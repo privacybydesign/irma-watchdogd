@@ -86,9 +86,10 @@ var (
 
 // Configuration
 type Conf struct {
-	CheckSchemeManagers map[string]string // {url: pk}
-	BindAddr            string            // port to bind to
-	Interval            time.Duration
+	CheckSchemeManagers    map[string]string // {url: pk}
+	BindAddr               string            // port to bind to
+	CheckCertificateExpiry []string
+	Interval               time.Duration
 }
 
 func main() {
@@ -162,10 +163,44 @@ func check() {
 
 	log.Println("Running checks ...")
 	newIssues = append(newIssues, checkSchemeManagers()...)
+	newIssues = append(newIssues, checkCertificateExpiry()...)
 
 	issues = newIssues
 	lastCheck = time.Now()
 	log.Printf("%v", issues)
+}
+
+func checkCertificateExpiry() []string {
+	ret := []string{}
+	for _, url := range conf.CheckCertificateExpiry {
+		ret = append(ret, checkCertificateExpiryOf(url)...)
+	}
+	return ret
+}
+
+func checkCertificateExpiryOf(url string) (ret []string) {
+	ret = []string{}
+	resp, err := http.Head(url)
+	if err != nil {
+		ret = append(ret, fmt.Sprintf("%s: error %s", url, err))
+		return
+	}
+	defer resp.Body.Close()
+	if resp.TLS == nil {
+		ret = append(ret, fmt.Sprintf("%s: no TLS enabled", url))
+		return
+	}
+
+	for _, cert := range resp.TLS.PeerCertificates {
+		issuer := strings.Join(cert.Issuer.Organization, ", ")
+		daysExpired := int(time.Since(cert.NotAfter).Hours() / 24)
+		if daysExpired > 0 {
+			ret = append(ret, fmt.Sprintf("%s: certificate from %s has expired %d days", url, issuer, daysExpired))
+		} else if daysExpired > -30 {
+			ret = append(ret, fmt.Sprintf("%s: certificate from %s will expire in %d days", url, issuer, -daysExpired))
+		}
+	}
+	return ret
 }
 
 func checkSchemeManagers() []string {

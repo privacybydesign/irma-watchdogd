@@ -5,6 +5,7 @@ At the moment it checks.
 
  * Whether the online SchemeManager files are accessable and  properly signed.
  * Whether the publickeys of the issuers will expire soon.
+ * Whether the TLS certificates of the webservers are (or soon will) expired
 
 Installation
 ------------
