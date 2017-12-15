@@ -41,7 +41,17 @@ var exampleConfig string = `
 
 var rawTemplate string = `
 <html>
-    <head><title>irma watchdog</title></head>
+    <head>
+        <title>irma watchdog</title>
+        <style>
+        body {
+            color: white;
+            background-color: black;
+            font-family: Open Sans,Helvetica,Arial,sans-serif;
+            font-size: smaller;
+        }
+        </style>
+    </head>
     <body>
         <ul>
         {{ range $i, $issue := .Issues }}
