@@ -167,7 +167,6 @@ func check() {
 
 	issues = newIssues
 	lastCheck = time.Now()
-	log.Printf("%v", issues)
 }
 
 func checkCertificateExpiry() []string {
