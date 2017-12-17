@@ -24,8 +24,8 @@ import (
 
 	"gopkg.in/yaml.v2"
 
-	"github.com/credentials/irmago"
-	schememgr "github.com/credentials/irmago/schememgr/cmd"
+	"github.com/privacybydesign/irmago"
+	schememgr "github.com/privacybydesign/irmago/schememgr/cmd"
 )
 
 var exampleConfig string = `
