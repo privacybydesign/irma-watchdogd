@@ -81,6 +81,7 @@ var (
 	conf           Conf
 	ticker         *time.Ticker
 	lastCheck      time.Time
+	initialCheck   bool
 	issues         []string
 	parsedTemplate *template.Template
 )
@@ -137,6 +138,7 @@ func main() {
 	ticker = time.NewTicker(conf.Interval)
 
 	go func() {
+		initialCheck = true
 		for {
 			check()
 			<-ticker.C
@@ -192,20 +194,25 @@ func check() {
 
 	if len(conf.SlackWebhooks) > 0 {
 		newIssues, fixedIssues := difference(issues, curIssues)
-		go pushToSlack(newIssues, fixedIssues)
+		go pushToSlack(newIssues, fixedIssues, initialCheck)
 	}
 
 	issues = curIssues
+	initialCheck = false
 	lastCheck = time.Now()
 }
 
-func pushToSlack(newIssues, fixedIssues []string) {
+func pushToSlack(newIssues, fixedIssues []string, initial bool) {
 	strGood := "good"
 	strBad := "bad"
 	for _, url := range conf.SlackWebhooks {
 		if len(newIssues) > 0 {
+			text := "New issues discovered."
+			if initial {
+				text = "I just (re)started and found the following issues."
+			}
 			payload := slack.Payload{
-				Text:        "New issues discovered.",
+				Text:        text,
 				Username:    "irma-historyd",
 				IconEmoji:   ":dog:",
 				Attachments: []slack.Attachment{},
