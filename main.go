@@ -168,13 +168,13 @@ func difference(old, cur []string) (came, gone []string) {
 	gone = []string{}
 	lut := make(map[string]bool)
 	for _, x := range old {
-		lut[x] = false
+		lut[x] = true
 	}
 	for _, x := range cur {
 		if _, ok := lut[x]; !ok {
 			came = append(came, x)
 		} else {
-			lut[x] = true
+			lut[x] = false
 		}
 	}
 	for x, isGone := range lut {
