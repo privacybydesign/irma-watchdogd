@@ -213,7 +213,7 @@ func pushToSlack(newIssues, fixedIssues []string, initial bool) {
 			}
 			payload := slack.Payload{
 				Text:        text,
-				Username:    "irma-historyd",
+				Username:    "irma-watchdogd",
 				IconEmoji:   ":dog:",
 				Attachments: []slack.Attachment{},
 			}
@@ -232,7 +232,7 @@ func pushToSlack(newIssues, fixedIssues []string, initial bool) {
 		if len(fixedIssues) > 0 {
 			payload := slack.Payload{
 				Text:        "The following issues were fixed.",
-				Username:    "irma-historyd",
+				Username:    "irma-watchdogd",
 				IconEmoji:   ":dog:",
 				Attachments: []slack.Attachment{},
 			}
