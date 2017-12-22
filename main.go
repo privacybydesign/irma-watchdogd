@@ -22,9 +22,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ashwanthkumar/slack-go-webhook"
+	"github.com/dustin/go-humanize"
 	"gopkg.in/yaml.v2"
 
-	"github.com/ashwanthkumar/slack-go-webhook"
 	"github.com/privacybydesign/irmago"
 	schememgr "github.com/privacybydesign/irmago/schememgr/cmd"
 )
@@ -61,7 +62,7 @@ var rawTemplate string = `
             <li>Everything is ok!</li>
         {{ end }}
         </ul>
-        <p>Last update at {{ .LastCheck }}</p>
+        <p>Last update {{ .LastCheck }}</p>
         <script type="text/javascript">
             setTimeout(function() {
                 window.location.reload(1);
@@ -153,7 +154,7 @@ func main() {
 // Handle / HTTP request
 func handler(w http.ResponseWriter, r *http.Request) {
 	err := parsedTemplate.Execute(w, templateContext{
-		LastCheck: lastCheck.Format("2006-01-02 15:04:05"),
+		LastCheck: humanize.Time(lastCheck),
 		Issues:    issues,
 		Interval:  int(conf.Interval.Seconds() * 1000),
 	})
