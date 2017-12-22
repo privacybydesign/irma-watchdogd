@@ -24,6 +24,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 
+	"github.com/ashwanthkumar/slack-go-webhook"
 	"github.com/credentials/irmago"
 	schememgr "github.com/credentials/irmago/schememgr/cmd"
 )
@@ -90,6 +91,7 @@ type Conf struct {
 	BindAddr               string            // port to bind to
 	CheckCertificateExpiry []string
 	Interval               time.Duration
+	SlackWebhooks          []string
 }
 
 func main() {
@@ -146,7 +148,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(conf.BindAddr, nil))
 }
 
-// Handle /submit HTTP requests used to submit events
+// Handle / HTTP request
 func handler(w http.ResponseWriter, r *http.Request) {
 	err := parsedTemplate.Execute(w, templateContext{
 		LastCheck: lastCheck.Format("2006-01-02 15:04:05"),
@@ -158,15 +160,88 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Computes difference between old and new issues
+func difference(old, cur []string) (came, gone []string) {
+	came = []string{}
+	gone = []string{}
+	lut := make(map[string]bool)
+	for _, x := range old {
+		lut[x] = false
+	}
+	for _, x := range cur {
+		if _, ok := lut[x]; !ok {
+			came = append(came, x)
+		} else {
+			lut[x] = true
+		}
+	}
+	for x, isGone := range lut {
+		if isGone {
+			gone = append(gone, x)
+		}
+	}
+	return
+}
+
 func check() {
-	newIssues := []string{}
+	curIssues := []string{}
 
 	log.Println("Running checks ...")
-	newIssues = append(newIssues, checkSchemeManagers()...)
-	newIssues = append(newIssues, checkCertificateExpiry()...)
+	curIssues = append(curIssues, checkSchemeManagers()...)
+	curIssues = append(curIssues, checkCertificateExpiry()...)
 
-	issues = newIssues
+	if len(conf.SlackWebhooks) > 0 {
+		newIssues, fixedIssues := difference(issues, curIssues)
+		go pushToSlack(newIssues, fixedIssues)
+	}
+
+	issues = curIssues
 	lastCheck = time.Now()
+}
+
+func pushToSlack(newIssues, fixedIssues []string) {
+	strGood := "good"
+	strBad := "bad"
+	for _, url := range conf.SlackWebhooks {
+		if len(newIssues) > 0 {
+			payload := slack.Payload{
+				Text:        "New issues discovered.",
+				Username:    "irma-historyd",
+				IconEmoji:   ":dog:",
+				Attachments: []slack.Attachment{},
+			}
+			for _, newIssue := range newIssues {
+				payload.Attachments = append(payload.Attachments, slack.Attachment{
+					Fallback: &newIssue,
+					Text:     &newIssue,
+					Color:    &strBad,
+				})
+			}
+			if err := slack.Send(url, "", payload); err != nil {
+				log.Printf("SlackWebhook %s: %s", url, err)
+				continue
+			}
+		}
+		if len(fixedIssues) > 0 {
+			payload := slack.Payload{
+				Text:        "The following issues were fixed.",
+				Username:    "irma-historyd",
+				IconEmoji:   ":dog:",
+				Attachments: []slack.Attachment{},
+			}
+			for _, fixedIssue := range fixedIssues {
+				payload.Attachments = append(payload.Attachments, slack.Attachment{
+					Fallback: &fixedIssue,
+					Text:     &fixedIssue,
+					Color:    &strGood,
+				})
+			}
+			if err := slack.Send(url, "", payload); err != nil {
+				log.Printf("SlackWebhook %s: %s", url, err)
+				continue
+			}
+		}
+	}
 }
 
 func checkCertificateExpiry() []string {
