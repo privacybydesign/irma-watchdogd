@@ -5,7 +5,7 @@ checkschememanagers:
             MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELzHV5ipBimWpuZIDaQQd+KmNpNop
             dpBeCqpDwf+Grrw9ReODb6nwlsPJ/c/gqLnc+Y3sKOAJ2bFGI+jHBSsglg==
             -----END PUBLIC KEY-----
-    https://credentials.github.io/irma_configuration/irma-demo:
+    https://privacybydesign.github.io/irma-demo-schememanager:
         |
             -----BEGIN PUBLIC KEY-----
             MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHVnmAY+kGkFZn7XXozdI4HY8GOjm
