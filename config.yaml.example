@@ -14,5 +14,7 @@ checkschememanagers:
 checkcertificateexpiry:
     - https://privacybydesign.foundation
     - https://metrics.privacybydesign.foundation
+checkatumservers:
+    - https://metrics.privacybydesign.foundation/atum
 bindaddr: ':8079'
 interval: 5m

@@ -26,6 +26,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"gopkg.in/yaml.v2"
 
+	"github.com/bwesterb/go-atum"
 	"github.com/privacybydesign/irmago"
 	schememgr "github.com/privacybydesign/irmago/schememgr/cmd"
 )
@@ -92,6 +93,7 @@ type Conf struct {
 	CheckSchemeManagers    map[string]string // {url: pk}
 	BindAddr               string            // port to bind to
 	CheckCertificateExpiry []string
+	CheckAtumServers       []string
 	Interval               time.Duration
 	SlackWebhooks          []string
 }
@@ -192,6 +194,7 @@ func check() {
 	log.Println("Running checks ...")
 	curIssues = append(curIssues, checkSchemeManagers()...)
 	curIssues = append(curIssues, checkCertificateExpiry()...)
+	curIssues = append(curIssues, checkAtumServers()...)
 
 	if len(conf.SlackWebhooks) > 0 {
 		newIssues, fixedIssues := difference(issues, curIssues)
@@ -285,12 +288,44 @@ func checkCertificateExpiryOf(url string) (ret []string) {
 	return ret
 }
 
+func checkAtumServers() []string {
+	ret := []string{}
+	for _, url := range conf.CheckAtumServers {
+		ret = append(ret, checkAtumServer(url)...)
+	}
+	return ret
+}
+
 func checkSchemeManagers() []string {
 	ret := []string{}
 	for url, pk := range conf.CheckSchemeManagers {
 		ret = append(ret, checkSchemeManager(url, pk)...)
 	}
 	return ret
+}
+
+func checkAtumServer(url string) (ret []string) {
+	ret = []string{}
+	log.Printf(" checking atum sever %s", url)
+	ts, err := atum.JsonStamp(url, []byte{1, 2, 3, 4, 5})
+	if err != nil {
+		ret = append(ret, fmt.Sprintf("%s: requesting Atum stamp failed: %s", url, err))
+		return
+	}
+	valid, url2, err := atum.Verify(ts, []byte{1, 2, 3, 4, 5})
+	if err != nil {
+		ret = append(ret, fmt.Sprintf("%s: failed to verify signature: %s", url, err))
+		return
+	}
+	if !valid {
+		ret = append(ret, fmt.Sprintf("%s: timestamp invalid", url))
+		return
+	}
+	if url != url2 {
+		ret = append(ret, fmt.Sprintf("%s: timestamp set for wrong url: %s", url, url2))
+		return
+	}
+	return
 }
 
 func checkSchemeManager(url, pk string) (ret []string) {
