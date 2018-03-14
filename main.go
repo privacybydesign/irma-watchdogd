@@ -312,7 +312,7 @@ func checkAtumServer(url string) (ret []string) {
 		ret = append(ret, fmt.Sprintf("%s: requesting Atum stamp failed: %s", url, err))
 		return
 	}
-	valid, url2, err := atum.Verify(ts, []byte{1, 2, 3, 4, 5})
+	valid, _, url2, err := atum.Verify(ts, []byte{1, 2, 3, 4, 5})
 	if err != nil {
 		ret = append(ret, fmt.Sprintf("%s: failed to verify signature: %s", url, err))
 		return
