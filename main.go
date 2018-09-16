@@ -222,6 +222,7 @@ func pushToSlack(newIssues, fixedIssues []string, initial bool) {
 				Attachments: []slack.Attachment{},
 			}
 			for _, newIssue := range newIssues {
+				newIssue := newIssue
 				payload.Attachments = append(payload.Attachments, slack.Attachment{
 					Fallback: &newIssue,
 					Text:     &newIssue,
@@ -241,6 +242,7 @@ func pushToSlack(newIssues, fixedIssues []string, initial bool) {
 				Attachments: []slack.Attachment{},
 			}
 			for _, fixedIssue := range fixedIssues {
+				fixedIssue := fixedIssue
 				payload.Attachments = append(payload.Attachments, slack.Attachment{
 					Fallback: &fixedIssue,
 					Text:     &fixedIssue,
