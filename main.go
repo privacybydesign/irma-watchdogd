@@ -10,6 +10,7 @@ import (
 	"encoding/xml"
 	"flag"
 	"fmt"
+	"github.com/privacybydesign/irmago/irma/cmd"
 	"html/template"
 	"io"
 	"io/ioutil"
@@ -28,7 +29,6 @@ import (
 
 	"github.com/bwesterb/go-atum"
 	"github.com/privacybydesign/irmago"
-	schememgr "github.com/privacybydesign/irmago/schememgr/cmd"
 )
 
 var exampleConfig string = `
@@ -448,9 +448,9 @@ func checkSchemeManager(url, pk string) (ret []string) {
 	}
 
 	// Verify signatures
-	err = schememgr.RunVerify(icDir)
+	err = cmd.RunVerify(icDir, false)
 	if err != nil {
-		ret = append(ret, fmt.Sprintf("%s: schememgr verify: %s", url, err))
+		ret = append(ret, fmt.Sprintf("%s: irma scheme verify: %s", url, err))
 	}
 
 	// Check expiry dates on public keys
