@@ -345,11 +345,8 @@ func checkAtumServer(url string) (ret []string) {
 func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 	ret = []string{}
 	log.Printf(" checking schememanagers")
-	// First, we download all the files of the schememanager.
-	// We need a temporary directory to store the files.
-	// As `schememgr verify' is a bit picky, we put everything in
-	//    <temp dir>/irma_configuration/<name of schememgr>
 
+	// Schemes are already downloaded in main(), only an update is required now
 	err := irmaConfig.UpdateSchemes()
 	if err != nil {
 		log.Printf("checkSchemeManager: update schemes: %s", err)
