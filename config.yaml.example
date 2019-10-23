@@ -1,16 +1,3 @@
-checkschememanagers:
-    https://privacybydesign.foundation/schememanager/pbdf:
-        |
-            -----BEGIN PUBLIC KEY-----
-            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELzHV5ipBimWpuZIDaQQd+KmNpNop
-            dpBeCqpDwf+Grrw9ReODb6nwlsPJ/c/gqLnc+Y3sKOAJ2bFGI+jHBSsglg==
-            -----END PUBLIC KEY-----
-    https://privacybydesign.github.io/irma-demo-schememanager:
-        |
-            -----BEGIN PUBLIC KEY-----
-            MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHVnmAY+kGkFZn7XXozdI4HY8GOjm
-            54ngh4chTfn6WsTCf2w5rprfIqML61z2VTE4k8yJ0Z1QbyW6cdaao8obTQ==
-            -----END PUBLIC KEY-----
 checkcertificateexpiry:
     - https://privacybydesign.foundation
     - https://metrics.privacybydesign.foundation
