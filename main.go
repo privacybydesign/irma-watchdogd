@@ -9,7 +9,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	irma "github.com/privacybydesign/irmago"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"time"
 
+	irma "github.com/privacybydesign/irmago"
+
 	"github.com/ashwanthkumar/slack-go-webhook"
 	"github.com/dustin/go-humanize"
 	"gopkg.in/yaml.v2"
@@ -27,13 +28,6 @@ import (
 )
 
 var exampleConfig string = `
-    checkschememanagers:
-        https://privacybydesign.foundation/schememanager/pbdf:
-            |
-                -----BEGIN PUBLIC KEY-----
-                MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELzHV5ipBimWpuZIDaQQd+KmNpNop
-                dpBeCqpDwf+Grrw9ReODb6nwlsPJ/c/gqLnc+Y3sKOAJ2bFGI+jHBSsglg==
-                -----END PUBLIC KEY-----
     bindaddr: ':8079'
     interval: 5m `
 
