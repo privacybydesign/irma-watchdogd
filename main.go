@@ -340,24 +340,26 @@ func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 	ret = []string{}
 	log.Printf(" checking schememanagers")
 
+	// Clear warnings of previous invocations
+	irmaConfig.Warnings = []string{}
+
 	// Schemes are already downloaded in main(), only an update is required now
+	// Updating the schemes also automatically reparses them when necessary, populating irmaConfig.Warnings
 	err := irmaConfig.UpdateSchemes()
 	if err != nil {
-		log.Printf("checkSchemeManager: update schemes: %s", err)
+		log.Printf("irma scheme verify: %s", err)
 		return
 	}
 
-	irmaConfig.Warnings = []string{}
 	for _, manager := range irmaConfig.SchemeManagers {
 		// Verify signatures
 		if err = irmaConfig.VerifySchemeManager(manager); err != nil {
-			ret = append(ret, fmt.Sprintf("%s: irma scheme verify -> VerifySchemeManager: %s", manager.ID, err))
+			ret = append(ret, fmt.Sprintf("irma scheme verify: signature verification %s: %s", manager.ID, err))
 		}
-		// Check expiry dates on public keys
-		if err = irmaConfig.ValidateKeys(); err != nil {
-			ret = append(ret, fmt.Sprintf("%s: irma scheme verify -> ValidateKeys: %s", manager.ID, err))
-		}
-
+	}
+	// Check expiry dates on public keys
+	if err = irmaConfig.ValidateKeys(); err != nil {
+		ret = append(ret, fmt.Sprintf("irma scheme verify: keys: %s", err))
 	}
 	ret = append(ret, irmaConfig.Warnings...)
 	return
