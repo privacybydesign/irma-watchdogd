@@ -270,12 +270,19 @@ func pushToSlack(newIssues, fixedIssues []string, initial bool) {
 	}
 }
 
+func logCurrentIssues(curIssues []string) {
+	if len(curIssues) > 0 {
+		log.Printf("Issues found:\n%s", strings.Join(curIssues, "\n"))
+	}
+}
+
 func checkCertificateExpiry() []string {
 	ret := []string{}
 	for _, url := range conf.CheckCertificateExpiry {
 		log.Printf(" checking certificate expiry on %s", url)
 		ret = append(ret, checkCertificateExpiryOf(url)...)
 	}
+	logCurrentIssues(ret)
 	return ret
 }
 
@@ -309,6 +316,7 @@ func checkAtumServers() []string {
 	for _, url := range conf.CheckAtumServers {
 		ret = append(ret, checkAtumServer(url)...)
 	}
+	logCurrentIssues(ret)
 	return ret
 }
 
@@ -347,7 +355,23 @@ func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 	// Updating the schemes also automatically reparses them when necessary, populating irmaConfig.Warnings
 	err := irmaConfig.UpdateSchemes()
 	if err != nil {
-		log.Printf("irma scheme verify: %s", err)
+		ret = append(ret, fmt.Sprintf("irma scheme verify: update schemes: %s", err))
+		return
+	}
+
+	// ParseFolder of UpdateSchemes is skipped when non of the schemes had to be updated. To enforce
+	// the warnings from ParseFolder to be generated always, ParseFolder has to be invoked here too.
+	// To avoid duplicate warnings, also clear warnings again.
+	irmaConfig.Warnings = []string{}
+	err = irmaConfig.ParseFolder()
+	if err != nil {
+		ret = append(ret, fmt.Sprintf("irma scheme verify: parse folder: %s", err))
+		return
+	}
+
+	// Check expiry dates on public keys
+	if err = irmaConfig.ValidateKeys(); err != nil {
+		ret = append(ret, fmt.Sprintf("irma scheme verify: keys: %s", err))
 		return
 	}
 
@@ -357,10 +381,8 @@ func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 			ret = append(ret, fmt.Sprintf("irma scheme verify: signature verification %s: %s", manager.ID, err))
 		}
 	}
-	// Check expiry dates on public keys
-	if err = irmaConfig.ValidateKeys(); err != nil {
-		ret = append(ret, fmt.Sprintf("irma scheme verify: keys: %s", err))
-	}
+
 	ret = append(ret, irmaConfig.Warnings...)
+	logCurrentIssues(ret)
 	return
 }
