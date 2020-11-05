@@ -1,0 +1,21 @@
+image: privacybydesign/golang:latest
+
+stages:
+  - build
+
+before_script:
+  - set -euxo pipefail
+
+binaries:
+  stage: build
+  variables:
+    GOOS: linux
+    GOARCH: amd64
+    CGO_ENABLED: 0
+    PACKAGE_NAME: github.com/privacybydesign/irma-watchdogd
+  artifacts:
+    paths:
+      - artifacts/*
+  script:
+    - mkdir -p artifacts
+    - go build -a -ldflags '-extldflags "-static"' -o "artifacts/irma-watchdogd" .
