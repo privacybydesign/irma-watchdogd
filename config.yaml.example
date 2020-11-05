@@ -5,7 +5,7 @@ checkschememanagers:
             MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELzHV5ipBimWpuZIDaQQd+KmNpNop
             dpBeCqpDwf+Grrw9ReODb6nwlsPJ/c/gqLnc+Y3sKOAJ2bFGI+jHBSsglg==
             -----END PUBLIC KEY-----
-    https://privacybydesign.foundation/schememanager/irma-demo-schememanager:
+    https://privacybydesign.foundation/schememanager/irma-demo:
         |
             -----BEGIN PUBLIC KEY-----
             MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEHVnmAY+kGkFZn7XXozdI4HY8GOjm
@@ -15,6 +15,6 @@ checkcertificateexpiry:
     - https://privacybydesign.foundation
     - https://metrics.privacybydesign.foundation
 checkatumservers:
-    - https://metrics.privacybydesign.foundation/atum
+    - https://keyshare.privacybydesign.foundation/atumd
 bindaddr: ':8079'
 interval: 5m
