@@ -113,6 +113,8 @@ func main() {
 		fmt.Println(exampleConfig)
 		os.Exit(1)
 		return
+	} else if err != nil {
+		log.Fatalf("Could not stat configuration file: %v", err)
 	}
 
 	buf, err := ioutil.ReadFile(confPath)
