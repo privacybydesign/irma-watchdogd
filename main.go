@@ -384,13 +384,6 @@ func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 		return
 	}
 
-	for _, manager := range irmaConfig.SchemeManagers {
-		// Verify signatures
-		if err = irmaConfig.VerifySchemeManager(manager); err != nil {
-			ret = append(ret, fmt.Sprintf("irma scheme verify: signature verification %s: %s", manager.ID, err))
-		}
-	}
-
 	ret = append(ret, irmaConfig.Warnings...)
 	logCurrentIssues(ret)
 	return
