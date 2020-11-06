@@ -28,6 +28,13 @@ import (
 )
 
 var exampleConfig string = `
+    checkschememanagers:
+        https://privacybydesign.foundation/schememanager/pbdf:
+            |
+                -----BEGIN PUBLIC KEY-----
+                MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELzHV5ipBimWpuZIDaQQd+KmNpNop
+                dpBeCqpDwf+Grrw9ReODb6nwlsPJ/c/gqLnc+Y3sKOAJ2bFGI+jHBSsglg==
+                -----END PUBLIC KEY-----
     bindaddr: ':8079'
     interval: 5m `
 
@@ -79,7 +86,8 @@ var (
 
 // Configuration
 type Conf struct {
-	BindAddr               string // port to bind to
+	CheckSchemeManagers    map[string]string // {url: pk}
+	BindAddr               string            // port to bind to
 	CheckCertificateExpiry []string
 	CheckAtumServers       []string
 	Interval               time.Duration
@@ -127,18 +135,19 @@ func main() {
 	icDir := path.Join(tempDir, "irma_configuration")
 	err = os.Mkdir(icDir, 0700)
 	if err != nil {
-		log.Printf("MkDir in temp dir for IRMA configuration(%s): %s", icDir, err)
+		log.Printf("MkDir in temp dir for IRMA configuration (%s): %s", icDir, err)
 		return
 	}
-	irmaConfig, err := irma.NewConfiguration(icDir)
+	irmaConfig, err := irma.NewConfiguration(icDir, irma.ConfigurationOptions{})
 	if err != nil {
-		log.Printf("IRMA configuration could not be loaded in temp dir %s", icDir)
+		log.Printf("IRMA configuration could not be loaded in temp dir %s: %s", icDir, err)
 		return
 	}
-	err = irmaConfig.DownloadDefaultSchemes()
-	if err != nil {
-		log.Printf("default IRMA configuration cannot be downloaded")
-		return
+	for url, pk := range conf.CheckSchemeManagers {
+		if err = irmaConfig.InstallScheme(url, []byte(pk)); err != nil {
+			log.Printf("could not install scheme %s: %s", icDir, err)
+			return
+		}
 	}
 
 	// set up HTTP server
