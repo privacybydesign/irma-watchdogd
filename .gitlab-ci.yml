@@ -14,6 +14,8 @@ binaries:
     CGO_ENABLED: 0
     PACKAGE_NAME: github.com/privacybydesign/irma-watchdogd
   artifacts:
+    # Disabling artifact expiry is not supported yet, so make
+    expire_in: 100 year
     paths:
       - artifacts/*
   script:
