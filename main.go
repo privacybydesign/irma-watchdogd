@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/hashicorp/go-retryablehttp"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -80,7 +81,7 @@ var (
 	ticker         *time.Ticker
 	lastCheck      time.Time
 	initialCheck   bool
-	issues         []string
+	issues         issueEntries
 	parsedTemplate *template.Template
 )
 
@@ -90,6 +91,7 @@ type Conf struct {
 	BindAddr               string            // port to bind to
 	CheckCertificateExpiry []string
 	CheckAtumServers       []string
+	HealthChecks           []HealthCheck
 	Interval               time.Duration
 	SlackWebhooks          []string
 }
@@ -167,7 +169,7 @@ func main() {
 	go func() {
 		initialCheck = true
 		for {
-			check(irmaConfig)
+			runChecks(irmaConfig)
 			<-ticker.C
 		}
 	}()
@@ -181,7 +183,7 @@ func main() {
 func handler(w http.ResponseWriter, r *http.Request) {
 	err := parsedTemplate.Execute(w, templateContext{
 		LastCheck: humanize.Time(lastCheck),
-		Issues:    issues,
+		Issues:    issues.messages(),
 		Interval:  int(conf.Interval.Seconds() * 1000),
 	})
 	if err != nil {
@@ -190,21 +192,20 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Computes difference between old and new issues
-func difference(old, cur []string) (came, gone []string) {
-	came = []string{}
-	gone = []string{}
+func difference(old, cur issueEntries) (came, gone issueEntries) {
 	lut := make(map[string]bool)
 	for _, x := range old {
-		lut[x] = true
+		lut[x.message] = true
 	}
 	for _, x := range cur {
-		if _, ok := lut[x]; !ok {
+		if _, ok := lut[x.message]; !ok {
 			came = append(came, x)
 		} else {
-			lut[x] = false
+			lut[x.message] = false
 		}
 	}
-	for x, isGone := range lut {
+	for _, x := range old {
+		isGone := lut[x.message]
 		if isGone {
 			gone = append(gone, x)
 		}
@@ -212,13 +213,16 @@ func difference(old, cur []string) (came, gone []string) {
 	return
 }
 
-func check(irmaConfig *irma.Configuration) {
-	curIssues := []string{}
+func runChecks(irmaConfig *irma.Configuration) {
+	var curIssues issueEntries
 
 	log.Println("Running checks ...")
 	curIssues = append(curIssues, checkSchemeManagers(irmaConfig)...)
 	curIssues = append(curIssues, checkCertificateExpiry()...)
 	curIssues = append(curIssues, checkAtumServers()...)
+	curIssues = append(curIssues, runHealthChecks(conf.HealthChecks)...)
+
+	logCurrentIssues(curIssues.messages())
 
 	if len(conf.SlackWebhooks) > 0 {
 		newIssues, fixedIssues := difference(issues, curIssues)
@@ -230,53 +234,71 @@ func check(irmaConfig *irma.Configuration) {
 	lastCheck = time.Now()
 }
 
-func pushToSlack(newIssues, fixedIssues []string, initial bool) {
+func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 	strGood := "good"
+	strWarning := "warning"
 	strBad := "bad"
-	for _, url := range conf.SlackWebhooks {
-		if len(newIssues) > 0 {
-			text := "New issues discovered."
-			if initial {
-				text = "I just (re)started and found the following issues."
-			}
-			payload := slack.Payload{
-				Text:        text,
-				Username:    "irma-watchdogd",
-				IconEmoji:   ":dog:",
-				Attachments: []slack.Attachment{},
-			}
-			for _, newIssue := range newIssues {
-				newIssue := newIssue
-				payload.Attachments = append(payload.Attachments, slack.Attachment{
-					Fallback: &newIssue,
-					Text:     &newIssue,
+	if len(newIssues) > 0 {
+		if initial {
+			pushMessageToSlack("I just (re)started, so I might repeat some known issues.", []slack.Attachment{})
+		}
+
+		dangers := newIssues.filter(danger)
+		warnings := newIssues.filter(warning)
+
+		if len(dangers) > 0 {
+			// Add mention such that notifications for warnings can be suppressed.
+			message := "@channel New issues discovered."
+			var attachments []slack.Attachment
+			for _, msg := range dangers {
+				attachments = append(attachments, slack.Attachment{
+					Fallback: &msg,
+					Text:     &msg,
 					Color:    &strBad,
 				})
 			}
-			if err := slack.Send(url, "", payload); err != nil {
-				log.Printf("SlackWebhook %s: %s", url, err)
-				continue
-			}
+			pushMessageToSlack(message, attachments)
 		}
-		if len(fixedIssues) > 0 {
-			payload := slack.Payload{
-				Text:        "The following issues were fixed.",
-				Username:    "irma-watchdogd",
-				IconEmoji:   ":dog:",
-				Attachments: []slack.Attachment{},
-			}
-			for _, fixedIssue := range fixedIssues {
-				fixedIssue := fixedIssue
-				payload.Attachments = append(payload.Attachments, slack.Attachment{
-					Fallback: &fixedIssue,
-					Text:     &fixedIssue,
-					Color:    &strGood,
+
+		if len(warnings) > 0 {
+			message := "New warnings discovered."
+			var attachments []slack.Attachment
+			for _, msg := range warnings {
+				attachments = append(attachments, slack.Attachment{
+					Fallback: &msg,
+					Text:     &msg,
+					Color:    &strWarning,
 				})
 			}
-			if err := slack.Send(url, "", payload); err != nil {
-				log.Printf("SlackWebhook %s: %s", url, err)
-				continue
-			}
+			pushMessageToSlack(message, attachments)
+		}
+	}
+
+	if len(fixedIssues) > 0 {
+		message := "The following issues and warnings were fixed."
+		var attachments []slack.Attachment
+		for _, msg := range fixedIssues.messages() {
+			attachments = append(attachments, slack.Attachment{
+				Fallback: &msg,
+				Text:     &msg,
+				Color:    &strGood,
+			})
+		}
+		pushMessageToSlack(message, attachments)
+	}
+}
+
+func pushMessageToSlack(message string, attachments []slack.Attachment) {
+	for _, url := range conf.SlackWebhooks {
+		payload := slack.Payload{
+			Text:        message,
+			Username:    "irma-watchdogd",
+			IconEmoji:   ":dog:",
+			Attachments: attachments,
+		}
+		if err := slack.Send(url, "", payload); err != nil {
+			log.Printf("SlackWebhook %s: %s", url, err)
+			continue
 		}
 	}
 }
@@ -287,26 +309,24 @@ func logCurrentIssues(curIssues []string) {
 	}
 }
 
-func checkCertificateExpiry() []string {
-	ret := []string{}
+func checkCertificateExpiry() (ret issueEntries) {
 	for _, url := range conf.CheckCertificateExpiry {
 		log.Printf(" checking certificate expiry on %s", url)
 		ret = append(ret, checkCertificateExpiryOf(url)...)
 	}
-	logCurrentIssues(ret)
-	return ret
+	return
 }
 
-func checkCertificateExpiryOf(url string) (ret []string) {
-	ret = []string{}
-	resp, err := http.Head(url)
+func checkCertificateExpiryOf(url string) (ret issueEntries) {
+	// Use retryablehttp to prevent false positives.
+	resp, err := retryablehttp.Head(url)
 	if err != nil {
-		ret = append(ret, fmt.Sprintf("%s: error %s", url, err))
+		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: error %s", url, err)})
 		return
 	}
 	defer resp.Body.Close()
 	if resp.TLS == nil {
-		ret = append(ret, fmt.Sprintf("%s: no TLS enabled", url))
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: no TLS enabled", url)})
 		return
 	}
 
@@ -314,49 +334,46 @@ func checkCertificateExpiryOf(url string) (ret []string) {
 		issuer := strings.Join(cert.Issuer.Organization, ", ")
 		daysExpired := int(time.Since(cert.NotAfter).Hours() / 24)
 		if daysExpired > 0 {
-			ret = append(ret, fmt.Sprintf("%s: certificate from %s has expired %d days", url, issuer, daysExpired))
+			ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: certificate from %s has expired %d days", url, issuer, daysExpired)})
 		} else if daysExpired > -30 {
-			ret = append(ret, fmt.Sprintf("%s: certificate from %s will expire in %d days", url, issuer, -daysExpired))
+			ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: certificate from %s will expire in %d days", url, issuer, -daysExpired)})
 		}
 	}
 	return ret
 }
 
-func checkAtumServers() []string {
-	ret := []string{}
+func checkAtumServers() (ret issueEntries) {
 	for _, url := range conf.CheckAtumServers {
 		ret = append(ret, checkAtumServer(url)...)
 	}
-	logCurrentIssues(ret)
-	return ret
+	return
 }
 
-func checkAtumServer(url string) (ret []string) {
-	ret = []string{}
+func checkAtumServer(url string) (ret issueEntries) {
 	log.Printf(" checking atum server %s", url)
 	ts, err := atum.JsonStamp(url, []byte{1, 2, 3, 4, 5})
 	if err != nil {
-		ret = append(ret, fmt.Sprintf("%s: requesting Atum stamp failed: %s", url, err))
+		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: requesting Atum stamp failed: %s", url, err)})
 		return
 	}
 	valid, _, url2, err := atum.Verify(ts, []byte{1, 2, 3, 4, 5})
 	if err != nil {
-		ret = append(ret, fmt.Sprintf("%s: failed to verify signature: %s", url, err))
+		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: failed to verify signature: %s", url, err)})
 		return
 	}
 	if !valid {
-		ret = append(ret, fmt.Sprintf("%s: timestamp invalid", url))
+		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: timestamp invalid", url)})
 		return
 	}
 	if url != url2 {
-		ret = append(ret, fmt.Sprintf("%s: timestamp set for wrong url: %s", url, url2))
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: timestamp set for wrong url: %s", url, url2)})
 		return
 	}
 	return
 }
 
-func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
-	ret = []string{}
+// The IRMA app keeps functioning when the scheme is down, so all issues that we find are warnings.
+func checkSchemeManagers(irmaConfig *irma.Configuration) (ret issueEntries) {
 	log.Printf(" checking schememanagers")
 
 	// Clear warnings of previous invocations
@@ -366,7 +383,7 @@ func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 	// Updating the schemes also automatically reparses them when necessary, populating irmaConfig.Warnings
 	err := irmaConfig.UpdateSchemes()
 	if err != nil {
-		ret = append(ret, fmt.Sprintf("irma scheme verify: update schemes: %s", err))
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("irma scheme verify: update schemes: %s", err)})
 		return
 	}
 
@@ -376,17 +393,19 @@ func checkSchemeManagers(irmaConfig *irma.Configuration) (ret []string) {
 	irmaConfig.Warnings = []string{}
 	err = irmaConfig.ParseFolder()
 	if err != nil {
-		ret = append(ret, fmt.Sprintf("irma scheme verify: parse folder: %s", err))
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("irma scheme verify: parse folder: %s", err)})
 		return
 	}
 
 	// Check expiry dates on public keys
 	if err = irmaConfig.ValidateKeys(); err != nil {
-		ret = append(ret, fmt.Sprintf("irma scheme verify: keys: %s", err))
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("irma scheme verify: keys: %s", err)})
 		return
 	}
 
-	ret = append(ret, irmaConfig.Warnings...)
-	logCurrentIssues(ret)
+	for _, warn := range irmaConfig.Warnings {
+		ret = append(ret, issueEntry{warning, warn})
+	}
+
 	return
 }
