@@ -44,7 +44,7 @@ func runHealthChecks(checks []HealthCheck) (issues issueEntries) {
 
 		resp, err := retryablehttp.NewClient().Do(req)
 		if err != nil {
-			issues = append(issues, issueEntry{danger, fmt.Sprintf("%s: cannot not be reached", check.RequestURL)})
+			issues = append(issues, issueEntry{danger, fmt.Sprintf("%s: cannot be reached", check.RequestURL)})
 			continue
 		}
 		if resp.StatusCode != check.ResponseStatusCodeEquals {
