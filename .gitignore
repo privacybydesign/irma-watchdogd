@@ -1,2 +1,4 @@
 /irma-watchdogd
 /config.yaml
+.DS_STORE
+.idea/
