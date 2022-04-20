@@ -251,6 +251,7 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 			message := "@channel New issues discovered."
 			var attachments []slack.Attachment
 			for _, msg := range dangers {
+				msg := msg
 				attachments = append(attachments, slack.Attachment{
 					Fallback: &msg,
 					Text:     &msg,
@@ -264,6 +265,7 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 			message := "New warnings discovered."
 			var attachments []slack.Attachment
 			for _, msg := range warnings {
+				msg := msg
 				attachments = append(attachments, slack.Attachment{
 					Fallback: &msg,
 					Text:     &msg,
@@ -278,6 +280,7 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 		message := "The following issues and warnings were fixed."
 		var attachments []slack.Attachment
 		for _, msg := range fixedIssues.messages() {
+			msg := msg
 			attachments = append(attachments, slack.Attachment{
 				Fallback: &msg,
 				Text:     &msg,
