@@ -9,7 +9,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/hashicorp/go-retryablehttp"
 	"html/template"
 	"io/ioutil"
 	"log"
@@ -18,6 +17,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 
 	irma "github.com/privacybydesign/irmago"
 
@@ -248,7 +249,7 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 
 		if len(dangers) > 0 {
 			// Add mention such that notifications for warnings can be suppressed.
-			message := "@channel New issues discovered."
+			message := "<!channel> New issues discovered."
 			var attachments []slack.Attachment
 			for _, msg := range dangers {
 				msg := msg
