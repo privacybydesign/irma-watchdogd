@@ -21,3 +21,6 @@ healthchecks:
       responsebodycontains: "De stichting Privacy by Design creëert en onderhoudt gratis open source software waarbij de privacy van de gebruiker voorop staat."
 bindaddr: ':8079'
 interval: 5m
+
+webhooks:
+    - https://example.com/?message=%s

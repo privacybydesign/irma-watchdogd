@@ -13,6 +13,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strings"
@@ -95,6 +96,7 @@ type Conf struct {
 	HealthChecks           []HealthCheck
 	Interval               time.Duration
 	SlackWebhooks          []string
+	WebHooks               []string
 }
 
 func main() {
@@ -225,14 +227,40 @@ func runChecks(irmaConfig *irma.Configuration) {
 
 	logCurrentIssues(curIssues.messages())
 
+	newIssues, fixedIssues := difference(issues, curIssues)
+
 	if len(conf.SlackWebhooks) > 0 {
-		newIssues, fixedIssues := difference(issues, curIssues)
 		go pushToSlack(newIssues, fixedIssues, initialCheck)
+	}
+
+	// If this is an initial check, don't send the issues to webhooks
+	if len(conf.WebHooks) > 0 && !initialCheck {
+		go pushToWebHooks(newIssues)
 	}
 
 	issues = curIssues
 	initialCheck = false
 	lastCheck = time.Now()
+}
+
+func pushToWebHooks(newIssues issueEntries) {
+	dangers := newIssues.filter(danger)
+	for _, msg := range dangers {
+		for _, bareURL := range conf.WebHooks {
+			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
+			res, err := http.Get(u)
+			if err != nil {
+				log.Printf("SMS webhook %s: %s", u, err)
+			}
+			body, err := ioutil.ReadAll(res.Body)
+			if err != nil {
+				log.Printf("Webhook response body error: %s", err)
+			}
+			if len(body) != 0 {
+				log.Printf("Webhook response body: %s", string(body))
+			}
+		}
+	}
 }
 
 func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
