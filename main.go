@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -342,16 +343,36 @@ func logCurrentIssues(curIssues []string) {
 }
 
 func checkCertificateExpiry() (ret issueEntries) {
-	for _, url := range conf.CheckCertificateExpiry {
-		log.Printf(" checking certificate expiry on %s", url)
-		ret = append(ret, checkCertificateExpiryOf(url)...)
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(conf.CheckCertificateExpiry))
+	issueEntriesChan := make(chan issueEntries, len(conf.CheckCertificateExpiry))
+
+	for _, check := range conf.CheckCertificateExpiry {
+		check := check
+		go func() {
+			issueEntriesChan <- checkCertificateExpiryOf(check)
+			waitGroup.Done()
+		}()
+		// Introduce a small delay to prevent all checks to be started at the same time.
+		time.Sleep(10 * time.Millisecond)
 	}
+
+	waitGroup.Wait()
+	close(issueEntriesChan)
+
+	for entries := range issueEntriesChan {
+		ret = append(ret, entries...)
+	}
+
 	return
 }
 
 func checkCertificateExpiryOf(url string) (ret issueEntries) {
+	log.Printf(" checking certificate expiry on %s", url)
 	// Use retryablehttp to prevent false positives.
-	resp, err := retryablehttp.Head(url)
+	client := retryablehttp.NewClient()
+	client.HTTPClient.Timeout = 3 * time.Second
+	resp, err := client.Head(url)
 	if err != nil {
 		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: error %s", url, err)})
 		return
