@@ -20,8 +20,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hashicorp/go-retryablehttp"
-
 	irma "github.com/privacybydesign/irmago"
 
 	"github.com/ashwanthkumar/slack-go-webhook"
@@ -369,9 +367,7 @@ func checkCertificateExpiry() (ret issueEntries) {
 
 func checkCertificateExpiryOf(url string) (ret issueEntries) {
 	log.Printf(" checking certificate expiry on %s", url)
-	// Use retryablehttp to prevent false positives.
-	client := retryablehttp.NewClient()
-	client.HTTPClient.Timeout = 3 * time.Second
+	client := newHTTPClient()
 	resp, err := client.Head(url)
 	if err != nil {
 		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: error %s", url, err)})

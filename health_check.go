@@ -72,8 +72,7 @@ func runHealthCheck(check HealthCheck) *issueEntry {
 
 	var intermediateIssue *issueEntry
 
-	client := retryablehttp.NewClient()
-	client.HTTPClient.Timeout = 3 * time.Second
+	client := newHTTPClient()
 	client.CheckRetry = func(ctx context.Context, resp *http.Response, respErr error) (bool, error) {
 		retry, err2 := retryablehttp.DefaultRetryPolicy(ctx, resp, respErr)
 		if !retry {
