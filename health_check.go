@@ -92,10 +92,8 @@ func runHealthCheck(check HealthCheck) *issueEntry {
 
 	// Generate warning if health check was unstable.
 	if intermediateIssue != nil {
-		return &issueEntry{
-			issueType: warning,
-			message:   fmt.Sprintf("Unstable health check: %s", intermediateIssue.message),
-		}
+		intermediateIssue.issueType = warning
+		return intermediateIssue
 	}
 	return nil
 }
