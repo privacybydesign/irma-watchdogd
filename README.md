@@ -10,8 +10,8 @@ At the moment it checks:
 
 The tool has the following ways to report issues it finds:
 
- * Using a HTTP GET request (pull)
- * HTTP webhook (push)
+ * Using an HTTP GET request (pull)
+ * HTTP webhooks (push)
  * Slack integration
 
 Installation
