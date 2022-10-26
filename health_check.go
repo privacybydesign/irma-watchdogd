@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/hashicorp/go-retryablehttp"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -70,40 +70,44 @@ func runHealthCheck(check HealthCheck) *issueEntry {
 		req.Header.Set(key, value)
 	}
 
-	var intermediateIssue *issueEntry
+	var issue *issueEntry
 
 	client := newHTTPClient()
 	client.CheckRetry = func(ctx context.Context, resp *http.Response, respErr error) (bool, error) {
-		retry, err2 := retryablehttp.DefaultRetryPolicy(ctx, resp, respErr)
-		if !retry {
-			return false, err2
+		// Do not retry if the check's context was cancelled.
+		if ctx.Err() != nil {
+			return false, ctx.Err()
 		}
-		if intermediateIssue == nil {
-			intermediateIssue = generateHealthCheckIssueEntry(check, resp, respErr)
+
+		newIssue := generateHealthCheckIssueEntry(check, resp, respErr)
+
+		// If no issue is found during the check, we can stop retrying.
+		if newIssue == nil {
+			return false, nil
 		}
-		return true, err2
+		issue = newIssue
+		return true, nil
 	}
 
-	resp, err := client.Do(req)
-	issue := generateHealthCheckIssueEntry(check, resp, err)
-	if issue != nil {
-		return issue
+	_, err = client.Do(req)
+	if issue == nil && err != nil {
+		issue = &issueEntry{
+			danger,
+			fmt.Sprint("Health check failed unexpectedly: ", err),
+		}
 	}
-
-	// Generate warning if health check was unstable.
-	if intermediateIssue != nil {
-		intermediateIssue.issueType = warning
-		intermediateIssue.message = fmt.Sprintf("Unstable health check: %s", intermediateIssue.message)
-		return intermediateIssue
+	if issue != nil && err == nil {
+		issue.issueType = warning
+		issue.message = fmt.Sprint("Unstable health check: ", issue.message)
 	}
-	return nil
+	return issue
 }
 
 func generateHealthCheckIssueEntry(check HealthCheck, resp *http.Response, respErr error) *issueEntry {
 	if respErr != nil {
 		return &issueEntry{danger, fmt.Sprintf("%s: cannot be reached", check.RequestURL)}
 	}
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return &issueEntry{danger, fmt.Sprintf("%s: response body could not be read", check.RequestURL)}
 	}
