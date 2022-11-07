@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -249,11 +250,13 @@ func pushToWebHooks(newIssues issueEntries) {
 			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
 			res, err := http.Get(u)
 			if err != nil {
-				log.Printf("SMS webhook %s: %s", u, err)
+				log.Printf("Webhook %s: %s", u, err)
+				return
 			}
-			body, err := ioutil.ReadAll(res.Body)
+			body, err := io.ReadAll(res.Body)
 			if err != nil {
 				log.Printf("Webhook response body error: %s", err)
+				return
 			}
 			if len(body) != 0 {
 				log.Printf("Webhook response body: %s", string(body))
