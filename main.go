@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -122,7 +121,7 @@ func main() {
 		log.Fatalf("Could not stat configuration file: %v", err)
 	}
 
-	buf, err := ioutil.ReadFile(confPath)
+	buf, err := os.ReadFile(confPath)
 	if err != nil {
 		log.Fatalf("Could not read config file %s: %s", confPath, err)
 	}
@@ -132,7 +131,7 @@ func main() {
 	}
 
 	// Load IRMA configuration
-	tempDir, err := ioutil.TempDir("", "")
+	tempDir, err := os.MkdirTemp("", "")
 	if err != nil {
 		log.Printf("checkSchemeManager: TempDir: %s", err)
 		return
