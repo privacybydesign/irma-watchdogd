@@ -373,7 +373,7 @@ func checkCertificateExpiryOf(url string) (ret issueEntries) {
 	client := newHTTPClient()
 	resp, err := client.Head(url)
 	if err != nil {
-		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: error %s", url, err)})
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: error %s", url, err)})
 		return
 	}
 	defer resp.Body.Close()
