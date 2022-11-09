@@ -10,7 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -121,7 +121,7 @@ func main() {
 		log.Fatalf("Could not stat configuration file: %v", err)
 	}
 
-	buf, err := ioutil.ReadFile(confPath)
+	buf, err := os.ReadFile(confPath)
 	if err != nil {
 		log.Fatalf("Could not read config file %s: %s", confPath, err)
 	}
@@ -131,7 +131,7 @@ func main() {
 	}
 
 	// Load IRMA configuration
-	tempDir, err := ioutil.TempDir("", "")
+	tempDir, err := os.MkdirTemp("", "")
 	if err != nil {
 		log.Printf("checkSchemeManager: TempDir: %s", err)
 		return
@@ -249,11 +249,13 @@ func pushToWebHooks(newIssues issueEntries) {
 			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
 			res, err := http.Get(u)
 			if err != nil {
-				log.Printf("SMS webhook %s: %s", u, err)
+				log.Printf("Webhook %s: %s", u, err)
+				return
 			}
-			body, err := ioutil.ReadAll(res.Body)
+			body, err := io.ReadAll(res.Body)
 			if err != nil {
 				log.Printf("Webhook response body error: %s", err)
+				return
 			}
 			if len(body) != 0 {
 				log.Printf("Webhook response body: %s", string(body))
@@ -370,7 +372,7 @@ func checkCertificateExpiryOf(url string) (ret issueEntries) {
 	client := newHTTPClient()
 	resp, err := client.Head(url)
 	if err != nil {
-		ret = append(ret, issueEntry{danger, fmt.Sprintf("%s: error %s", url, err)})
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: error %s", url, err)})
 		return
 	}
 	defer resp.Body.Close()
