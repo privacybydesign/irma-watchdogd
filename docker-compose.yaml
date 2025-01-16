@@ -1,0 +1,8 @@
+version: '3'
+services:
+  watchdog:
+    build: .
+    ports:
+      - "8079:8079"
+    volumes:
+      - ./config.yaml:/app/config.yaml
