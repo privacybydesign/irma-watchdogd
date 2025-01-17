@@ -14,7 +14,7 @@ FROM alpine:latest
 
 COPY --from=builder /app/watchdogd /app/watchdogd
 
-EXPOSE 8079
+EXPOSE 8080
 
 WORKDIR /app
 
