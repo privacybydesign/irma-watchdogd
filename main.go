@@ -37,7 +37,7 @@ var exampleConfig string = `
                 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAELzHV5ipBimWpuZIDaQQd+KmNpNop
                 dpBeCqpDwf+Grrw9ReODb6nwlsPJ/c/gqLnc+Y3sKOAJ2bFGI+jHBSsglg==
                 -----END PUBLIC KEY-----
-    bindaddr: ':8079'
+    bindaddr: ':8080'
     interval: 5m `
 
 var rawTemplate string = `
@@ -102,7 +102,7 @@ func main() {
 	var confPath string
 
 	// set configuration defaults
-	conf.BindAddr = ":8079"
+	conf.BindAddr = ":8080"
 	conf.Interval = 5 * time.Minute
 
 	// parse commandline
