@@ -18,4 +18,4 @@ EXPOSE 8080
 
 WORKDIR /app
 
-ENTRYPOINT ["/app/watchdogd"]
+ENTRYPOINT ["/app/watchdogd" , "--config","/config/config.yaml"]
