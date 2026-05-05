@@ -3,13 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/hashicorp/go-retryablehttp"
 	"io"
 	"log"
 	"net/http"
 	"strings"
-	"sync"
-	"time"
+
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 type HealthCheck struct {
@@ -24,21 +23,15 @@ type HealthCheck struct {
 }
 
 func runHealthChecks(checks []HealthCheck) (issues issueEntries) {
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(len(checks))
+	// Re-use the same HTTP client for all checks to prevent false positives due to DNS resolution, TLS handshake issues or connection starvastion
+	client := newHTTPClient()
 	issueChan := make(chan *issueEntry, len(checks))
 
 	for _, check := range checks {
 		check := check
-		go func() {
-			issueChan <- runHealthCheck(check)
-			waitGroup.Done()
-		}()
-		// Introduce a small delay to prevent all checks to be started at the same time.
-		time.Sleep(10 * time.Millisecond)
+		issueChan <- runHealthCheck(client, check)
 	}
 
-	waitGroup.Wait()
 	close(issueChan)
 
 	for issue := range issueChan {
@@ -49,7 +42,7 @@ func runHealthChecks(checks []HealthCheck) (issues issueEntries) {
 	return
 }
 
-func runHealthCheck(check HealthCheck) *issueEntry {
+func runHealthCheck(client *retryablehttp.Client, check HealthCheck) *issueEntry {
 	log.Printf(" checking HTTP endpoint %s", check.RequestURL)
 
 	// Set defaults
@@ -72,7 +65,6 @@ func runHealthCheck(check HealthCheck) *issueEntry {
 
 	var issue *issueEntry
 
-	client := newHTTPClient()
 	client.CheckRetry = func(ctx context.Context, resp *http.Response, respErr error) (bool, error) {
 		// Do not retry if the check's context was cancelled.
 		if ctx.Err() != nil {
@@ -111,8 +103,9 @@ func generateHealthCheckIssueEntry(check HealthCheck, resp *http.Response, respE
 	if err != nil {
 		return &issueEntry{danger, fmt.Sprintf("%s: response body could not be read", check.RequestURL)}
 	}
+
 	if resp.StatusCode != check.ResponseStatusCodeEquals {
-		return &issueEntry{danger, fmt.Sprintf("%s: received unexpected status code %d", check.RequestURL, resp.StatusCode)}
+		return &issueEntry{danger, fmt.Sprintf("%s: received unexpected status code %d (expected %d)", check.RequestURL, resp.StatusCode, check.ResponseStatusCodeEquals)}
 	}
 
 	for key, value := range check.ResponseHeaderContains {
@@ -122,6 +115,7 @@ func generateHealthCheckIssueEntry(check HealthCheck, resp *http.Response, respE
 	}
 
 	if !strings.Contains(string(respBody), check.ResponseBodyContains) {
+		log.Printf("response body %q should contain %q, but it was not found", string(respBody), check.ResponseBodyContains)
 		return &issueEntry{danger, fmt.Sprintf("%s: expected response body \"%s\" could not be found", check.RequestURL, check.ResponseBodyContains)}
 	}
 	return nil
