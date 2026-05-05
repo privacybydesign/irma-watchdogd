@@ -17,14 +17,14 @@ import (
 	"os"
 	"path"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/hashicorp/go-retryablehttp"
 	irma "github.com/privacybydesign/irmago"
 
 	"github.com/ashwanthkumar/slack-go-webhook"
 	"github.com/dustin/go-humanize"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 
 	"github.com/bwesterb/go-atum"
 )
@@ -343,21 +343,15 @@ func logCurrentIssues(curIssues []string) {
 }
 
 func checkCertificateExpiry() (ret issueEntries) {
-	var waitGroup sync.WaitGroup
-	waitGroup.Add(len(conf.CheckCertificateExpiry))
+	client := newHTTPClient()
+
 	issueEntriesChan := make(chan issueEntries, len(conf.CheckCertificateExpiry))
 
 	for _, check := range conf.CheckCertificateExpiry {
 		check := check
-		go func() {
-			issueEntriesChan <- checkCertificateExpiryOf(check)
-			waitGroup.Done()
-		}()
-		// Introduce a small delay to prevent all checks to be started at the same time.
-		time.Sleep(10 * time.Millisecond)
+		issueEntriesChan <- checkCertificateExpiryOf(client, check)
 	}
 
-	waitGroup.Wait()
 	close(issueEntriesChan)
 
 	for entries := range issueEntriesChan {
@@ -367,9 +361,8 @@ func checkCertificateExpiry() (ret issueEntries) {
 	return
 }
 
-func checkCertificateExpiryOf(url string) (ret issueEntries) {
+func checkCertificateExpiryOf(client *retryablehttp.Client, url string) (ret issueEntries) {
 	log.Printf(" checking certificate expiry on %s", url)
-	client := newHTTPClient()
 	resp, err := client.Head(url)
 	if err != nil {
 		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: error %s", url, err)})
