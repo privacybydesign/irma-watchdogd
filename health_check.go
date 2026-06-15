@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -63,6 +64,14 @@ func runHealthCheck(client *retryablehttp.Client, check HealthCheck) *issueEntry
 		req.Header.Set(key, value)
 	}
 
+	// Record per-attempt connection timings so a failure tells us which phase
+	// (DNS, connect, TLS, first byte) was slow or hung, from the pod's vantage.
+	trace := newRequestTrace()
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace.clientTrace()))
+	client.RequestLogHook = func(_ retryablehttp.Logger, _ *http.Request, attempt int) {
+		trace.reset(attempt)
+	}
+
 	var issue *issueEntry
 
 	client.CheckRetry = func(ctx context.Context, resp *http.Response, respErr error) (bool, error) {
@@ -77,6 +86,7 @@ func runHealthCheck(client *retryablehttp.Client, check HealthCheck) *issueEntry
 		if newIssue == nil {
 			return false, nil
 		}
+		logFailedAttempt(check.RequestMethod, check.RequestURL, trace, respErr)
 		issue = newIssue
 		return true, nil
 	}
