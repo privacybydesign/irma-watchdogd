@@ -101,7 +101,12 @@ probe_dns() {
   local host="$1" rc
   [ -z "$dns_tool" ] && { printf 'dns=skip'; return; }
   case "$dns_tool" in
-    dig)      dig +time=2 +tries=1 +short A "$host" >/dev/null 2>&1; rc=$? ;;
+    dig)
+      # dig exits 0 even on NXDOMAIN/SERVFAIL (only a no-reply/timeout is
+      # non-zero), so check for an actual answer instead of the exit code —
+      # otherwise a failing resolver would still be reported as dns=ok.
+      if [ -n "$(dig +time=2 +tries=1 +short A "$host" 2>/dev/null)" ]; then rc=0; else rc=1; fi
+      ;;
     nslookup) nslookup "$host"     >/dev/null 2>&1; rc=$? ;;
     getent)   getent hosts "$host" >/dev/null 2>&1; rc=$? ;;
   esac
@@ -114,7 +119,7 @@ probe_url() {
 
   # %{time_*} are seconds with millisecond precision; on redirects they reflect
   # the final hop. remote_ip shows which backend actually answered.
-  out=$(curl -sS -o /dev/null -L -X "$METHOD" --max-time "$MAX_TIME" \
+  out=$(curl -s -o /dev/null -L -X "$METHOD" --max-time "$MAX_TIME" \
     -w '%{http_code} %{time_namelookup} %{time_connect} %{time_appconnect} %{time_starttransfer} %{time_total} %{remote_ip}' \
     "$url" 2>/dev/null)
   rc=$?
