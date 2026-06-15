@@ -22,5 +22,11 @@ healthchecks:
 bindaddr: ':8079'
 interval: 5m
 
+# Number of consecutive check cycles an issue must be observed before it is
+# reported to Slack/webhooks. Higher values suppress transient blips (a host
+# briefly unreachable) at the cost of slower alerting on real outages.
+# Defaults to 3. Set to 1 to alert on the first failed cycle (old behaviour).
+failurethreshold: 3
+
 webhooks:
     - https://example.com/?message=%s

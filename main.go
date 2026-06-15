@@ -84,6 +84,10 @@ var (
 	initialCheck   bool
 	issues         issueEntries
 	parsedTemplate *template.Template
+
+	// failureStreaks tracks, per issue message, how many consecutive check
+	// cycles it has been observed. Used to debounce transient blips.
+	failureStreaks = map[string]int{}
 )
 
 // Configuration
@@ -96,6 +100,7 @@ type Conf struct {
 	Interval               time.Duration
 	SlackWebhooks          []string
 	WebHooks               []string
+	FailureThreshold       int // consecutive cycles an issue must persist before it is reported
 }
 
 func main() {
@@ -104,6 +109,7 @@ func main() {
 	// set configuration defaults
 	conf.BindAddr = ":8080"
 	conf.Interval = 5 * time.Minute
+	conf.FailureThreshold = 3
 
 	// parse commandline
 	flag.StringVar(&confPath, "config", "config.yaml",
@@ -128,6 +134,12 @@ func main() {
 
 	if err := yaml.Unmarshal(buf, &conf); err != nil {
 		log.Fatalf("Could not parse config file: %s", err)
+	}
+
+	// A threshold below 1 would mean "report before observing", which makes no
+	// sense; clamp it so a value of 1 reproduces the old alert-immediately behaviour.
+	if conf.FailureThreshold < 1 {
+		conf.FailureThreshold = 1
 	}
 
 	// Load IRMA configuration
@@ -226,7 +238,12 @@ func runChecks(irmaConfig *irma.Configuration) {
 
 	logCurrentIssues(curIssues.messages())
 
-	newIssues, fixedIssues := difference(issues, curIssues)
+	// Debounce transient blips: only treat an issue as confirmed once it has
+	// been observed for conf.FailureThreshold consecutive cycles. A host that is
+	// briefly unreachable and recovers within a cycle or two is never reported.
+	confirmedIssues := confirmIssues(curIssues)
+
+	newIssues, fixedIssues := difference(issues, confirmedIssues)
 
 	if len(conf.SlackWebhooks) > 0 {
 		go pushToSlack(newIssues, fixedIssues, initialCheck)
@@ -237,9 +254,44 @@ func runChecks(irmaConfig *irma.Configuration) {
 		go pushToWebHooks(newIssues)
 	}
 
-	issues = curIssues
+	issues = confirmedIssues
 	initialCheck = false
 	lastCheck = time.Now()
+}
+
+// confirmIssues applies cross-cycle debouncing. It tracks how many consecutive
+// cycles each issue (keyed by message) has been observed and returns only those
+// that have reached conf.FailureThreshold. Issues that are absent this cycle
+// have their streak reset, so a recovered blip starts counting from scratch if
+// it ever returns.
+func confirmIssues(curIssues issueEntries) (confirmed issueEntries) {
+	curMessages := make(map[string]bool, len(curIssues))
+	for _, issue := range curIssues {
+		curMessages[issue.message] = true
+	}
+
+	// Reset streaks for issues that are no longer present.
+	for msg := range failureStreaks {
+		if !curMessages[msg] {
+			delete(failureStreaks, msg)
+		}
+	}
+
+	var pending []string
+	for _, issue := range curIssues {
+		failureStreaks[issue.message]++
+		if failureStreaks[issue.message] >= conf.FailureThreshold {
+			confirmed = append(confirmed, issue)
+		} else {
+			pending = append(pending, fmt.Sprintf("%s (%d/%d)", issue.message, failureStreaks[issue.message], conf.FailureThreshold))
+		}
+	}
+
+	if len(pending) > 0 {
+		log.Printf("Pending issues (awaiting confirmation):\n%s", strings.Join(pending, "\n"))
+	}
+
+	return
 }
 
 func pushToWebHooks(newIssues issueEntries) {
