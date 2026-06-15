@@ -7,12 +7,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path"
@@ -363,7 +365,29 @@ func checkCertificateExpiry() (ret issueEntries) {
 
 func checkCertificateExpiryOf(client *retryablehttp.Client, url string) (ret issueEntries) {
 	log.Printf(" checking certificate expiry on %s", url)
-	resp, err := client.Head(url)
+
+	req, err := retryablehttp.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: invalid certificate check: %s", url, err)})
+		return
+	}
+
+	// Record per-attempt connection timings so a failure tells us which phase
+	// (DNS, connect, TLS, first byte) was slow or hung, from the pod's vantage.
+	trace := newRequestTrace()
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace.clientTrace()))
+	client.RequestLogHook = func(_ retryablehttp.Logger, _ *http.Request, attempt int) {
+		trace.reset(attempt)
+	}
+	client.CheckRetry = func(ctx context.Context, resp *http.Response, respErr error) (bool, error) {
+		shouldRetry, retErr := retryablehttp.DefaultRetryPolicy(ctx, resp, respErr)
+		if respErr != nil || shouldRetry {
+			logFailedAttempt(http.MethodHead, url, trace, respErr)
+		}
+		return shouldRetry, retErr
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: error %s", url, err)})
 		return
