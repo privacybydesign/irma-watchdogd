@@ -6,6 +6,8 @@ import "testing"
 func resetDebounceState(threshold int) {
 	failureStreaks = map[string]int{}
 	conf.FailureThreshold = threshold
+	cycleCount = 0
+	initialCheck = false
 }
 
 func issue(msg string) issueEntry {
@@ -97,5 +99,68 @@ func TestDebounceEndToEnd(t *testing.T) {
 	_, f := step(issueEntries{})
 	if len(f) != 1 || f[0].message != persistent {
 		t.Fatalf("cycle 5: expected %q reported as fixed, got %v", persistent, f.messages())
+	}
+}
+
+// stepInitialWindow mirrors the initialCheck bookkeeping at the top of runChecks
+// and returns whether the cycle is treated as initial.
+func stepInitialWindow() bool {
+	cycleCount++
+	initialCheck = cycleCount <= conf.FailureThreshold
+	return initialCheck
+}
+
+// TestInitialCheckWindowCoversDebounceDelay verifies that the initialCheck
+// window stays open long enough for a startup-present issue to be confirmed.
+// Under debouncing such an issue only surfaces on cycle == FailureThreshold, so
+// closing the window after the first cycle (the previous behaviour) would let a
+// restart-time outage page as brand new and kill the restart Slack preamble.
+func TestInitialCheckWindowCoversDebounceDelay(t *testing.T) {
+	resetDebounceState(3)
+
+	startupIssue := "yivi.app: cannot be reached"
+
+	// Cycles 1 and 2: the issue is detected but not yet confirmed; the window
+	// must remain open so it is still considered initial once it is confirmed.
+	for cycle := 1; cycle <= 2; cycle++ {
+		initial := stepInitialWindow()
+		if got := confirmedMessages(issueEntries{issue(startupIssue)}); len(got) != 0 {
+			t.Fatalf("cycle %d: expected not yet confirmed, got %v", cycle, got)
+		}
+		if !initial {
+			t.Fatalf("cycle %d: expected initialCheck to still be true", cycle)
+		}
+	}
+
+	// Cycle 3: the startup issue is confirmed for the first time and must still
+	// be flagged initial, so it is suppressed from webhooks and the restart
+	// preamble fires.
+	initial := stepInitialWindow()
+	got := confirmedMessages(issueEntries{issue(startupIssue)})
+	if len(got) != 1 || got[0] != startupIssue {
+		t.Fatalf("cycle 3: expected %q confirmed, got %v", startupIssue, got)
+	}
+	if !initial {
+		t.Fatalf("cycle 3: expected initialCheck to be true when the startup issue is first confirmed")
+	}
+
+	// Cycle 4 onwards: the startup window is closed; a genuinely new issue that
+	// appears later must page normally (not be treated as a restart artefact).
+	if initial := stepInitialWindow(); initial {
+		t.Fatalf("cycle 4: expected initialCheck to be false once the startup window has passed")
+	}
+}
+
+// TestInitialCheckThresholdOneMatchesOldBehaviour confirms that with
+// FailureThreshold == 1 only the very first cycle is initial, exactly
+// reproducing the pre-debounce semantics.
+func TestInitialCheckThresholdOneMatchesOldBehaviour(t *testing.T) {
+	resetDebounceState(1)
+
+	if initial := stepInitialWindow(); !initial {
+		t.Fatalf("cycle 1: expected initialCheck to be true")
+	}
+	if initial := stepInitialWindow(); initial {
+		t.Fatalf("cycle 2: expected initialCheck to be false")
 	}
 }

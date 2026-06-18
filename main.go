@@ -88,6 +88,13 @@ var (
 	// failureStreaks tracks, per issue message, how many consecutive check
 	// cycles it has been observed. Used to debounce transient blips.
 	failureStreaks = map[string]int{}
+
+	// cycleCount counts how many check cycles have run since (re)start. It drives
+	// the initialCheck window: an issue present from the very first cycle is only
+	// confirmed once its streak reaches conf.FailureThreshold (i.e. at cycle
+	// conf.FailureThreshold), so the "this might be pre-existing" startup window
+	// must stay open that long rather than closing after the first cycle.
+	cycleCount int
 )
 
 // Configuration
@@ -181,7 +188,6 @@ func main() {
 	ticker = time.NewTicker(conf.Interval)
 
 	go func() {
-		initialCheck = true
 		for {
 			runChecks(irmaConfig)
 			<-ticker.C
@@ -230,6 +236,15 @@ func difference(old, cur issueEntries) (came, gone issueEntries) {
 func runChecks(irmaConfig *irma.Configuration) {
 	var curIssues issueEntries
 
+	// An issue that has been failing since startup is only confirmed once its
+	// streak reaches conf.FailureThreshold, which happens on cycle
+	// conf.FailureThreshold. Treat every cycle up to and including that one as
+	// "initial", so a pre-existing outage that surfaces under debouncing is still
+	// recognised as a restart artefact (suppressed from webhooks, flagged with
+	// the "I just (re)started" Slack preamble) rather than paged as brand new.
+	cycleCount++
+	initialCheck = cycleCount <= conf.FailureThreshold
+
 	log.Println("Running checks ...")
 	curIssues = append(curIssues, checkSchemeManagers(irmaConfig)...)
 	curIssues = append(curIssues, checkCertificateExpiry()...)
@@ -255,7 +270,6 @@ func runChecks(irmaConfig *irma.Configuration) {
 	}
 
 	issues = confirmedIssues
-	initialCheck = false
 	lastCheck = time.Now()
 }
 
