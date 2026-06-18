@@ -291,8 +291,17 @@ func confirmIssues(curIssues issueEntries) (confirmed issueEntries) {
 		}
 	}
 
+	// Count each distinct message at most once per cycle, so two entries with
+	// the same message (e.g. duplicate health checks on one URL) can't advance
+	// the streak twice or land in confirmed twice.
 	var pending []string
+	counted := make(map[string]bool, len(curIssues))
 	for _, issue := range curIssues {
+		if counted[issue.message] {
+			continue
+		}
+		counted[issue.message] = true
+
 		failureStreaks[issue.message]++
 		if failureStreaks[issue.message] >= conf.FailureThreshold {
 			confirmed = append(confirmed, issue)

@@ -51,6 +51,28 @@ func TestConfirmIssuesReportsPersistentIssue(t *testing.T) {
 	}
 }
 
+func TestConfirmIssuesDeduplicatesMessagesWithinCycle(t *testing.T) {
+	resetDebounceState(3)
+
+	msg := "yivi.app: cannot be reached"
+	// Two entries with the same message in a single cycle (e.g. duplicate health
+	// checks on one URL) must advance the streak by one, not two, and must not
+	// land in the confirmed set twice.
+	dup := issueEntries{issue(msg), issue(msg)}
+
+	for cycle := 1; cycle <= 2; cycle++ {
+		if got := confirmedMessages(dup); len(got) != 0 {
+			t.Fatalf("cycle %d: expected not yet confirmed, got %v", cycle, got)
+		}
+	}
+	// Only on the third consecutive cycle does the streak reach the threshold,
+	// and the message is confirmed exactly once.
+	got := confirmedMessages(dup)
+	if len(got) != 1 || got[0] != msg {
+		t.Fatalf("cycle 3: expected %q confirmed exactly once, got %v", msg, got)
+	}
+}
+
 func TestConfirmIssuesThresholdOneAlertsImmediately(t *testing.T) {
 	resetDebounceState(1)
 
