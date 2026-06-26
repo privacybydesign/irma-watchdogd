@@ -19,6 +19,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -82,11 +83,32 @@ type templateContext struct {
 var (
 	conf           Conf
 	ticker         *time.Ticker
-	lastCheck      time.Time
 	initialCheck   bool
-	issues         issueEntries
 	parsedTemplate *template.Template
+
+	// stateMu guards the mutable state shared between the background check
+	// goroutine (writer) and the HTTP handler (reader). Without it the handler
+	// races the checker on every cycle, which can produce a torn read and crash
+	// the server. Access lastCheck/issues only through stateMu / setState.
+	stateMu   sync.RWMutex
+	lastCheck time.Time
+	issues    issueEntries
 )
+
+// setState atomically publishes the result of a completed check cycle.
+func setState(curIssues issueEntries, when time.Time) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	issues = curIssues
+	lastCheck = when
+}
+
+// currentState returns a snapshot of the published state for rendering.
+func currentState() (issueEntries, time.Time) {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+	return issues, lastCheck
+}
 
 // Configuration
 type Conf struct {
@@ -185,9 +207,10 @@ func main() {
 
 // Handle / HTTP request
 func handler(w http.ResponseWriter, r *http.Request) {
+	curIssues, when := currentState()
 	err := parsedTemplate.Execute(w, templateContext{
-		LastCheck: humanize.Time(lastCheck),
-		Issues:    issues.messages(),
+		LastCheck: humanize.Time(when),
+		Issues:    curIssues.messages(),
 		Interval:  int(conf.Interval.Seconds() * 1000),
 	})
 	if err != nil {
@@ -228,7 +251,8 @@ func runChecks(irmaConfig *irma.Configuration) {
 
 	logCurrentIssues(curIssues.messages())
 
-	newIssues, fixedIssues := difference(issues, curIssues)
+	prevIssues, _ := currentState()
+	newIssues, fixedIssues := difference(prevIssues, curIssues)
 
 	if len(conf.SlackWebhooks) > 0 {
 		go pushToSlack(newIssues, fixedIssues, initialCheck)
@@ -239,9 +263,8 @@ func runChecks(irmaConfig *irma.Configuration) {
 		go pushToWebHooks(newIssues)
 	}
 
-	issues = curIssues
+	setState(curIssues, time.Now())
 	initialCheck = false
-	lastCheck = time.Now()
 }
 
 func pushToWebHooks(newIssues issueEntries) {
