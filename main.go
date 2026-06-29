@@ -7,16 +7,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -80,9 +83,7 @@ type templateContext struct {
 var (
 	conf           Conf
 	ticker         *time.Ticker
-	lastCheck      time.Time
 	initialCheck   bool
-	issues         issueEntries
 	parsedTemplate *template.Template
 
 	// failureStreaks tracks, per issue message, how many consecutive check
@@ -95,7 +96,30 @@ var (
 	// conf.FailureThreshold), so the "this might be pre-existing" startup window
 	// must stay open that long rather than closing after the first cycle.
 	cycleCount int
+
+	// stateMu guards the mutable state shared between the background check
+	// goroutine (writer) and the HTTP handler (reader). Without it the handler
+	// races the checker on every cycle, which can produce a torn read and crash
+	// the server. Access lastCheck/issues only through stateMu / setState.
+	stateMu   sync.RWMutex
+	lastCheck time.Time
+	issues    issueEntries
 )
+
+// setState atomically publishes the result of a completed check cycle.
+func setState(curIssues issueEntries, when time.Time) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	issues = curIssues
+	lastCheck = when
+}
+
+// currentState returns a snapshot of the published state for rendering.
+func currentState() (issueEntries, time.Time) {
+	stateMu.RLock()
+	defer stateMu.RUnlock()
+	return issues, lastCheck
+}
 
 // Configuration
 type Conf struct {
@@ -201,9 +225,10 @@ func main() {
 
 // Handle / HTTP request
 func handler(w http.ResponseWriter, r *http.Request) {
+	curIssues, when := currentState()
 	err := parsedTemplate.Execute(w, templateContext{
-		LastCheck: humanize.Time(lastCheck),
-		Issues:    issues.messages(),
+		LastCheck: humanize.Time(when),
+		Issues:    curIssues.messages(),
 		Interval:  int(conf.Interval.Seconds() * 1000),
 	})
 	if err != nil {
@@ -258,7 +283,8 @@ func runChecks(irmaConfig *irma.Configuration) {
 	// briefly unreachable and recovers within a cycle or two is never reported.
 	confirmedIssues := confirmIssues(curIssues)
 
-	newIssues, fixedIssues := difference(issues, confirmedIssues)
+	prevIssues, _ := currentState()
+	newIssues, fixedIssues := difference(prevIssues, confirmedIssues)
 
 	if len(conf.SlackWebhooks) > 0 {
 		go pushToSlack(newIssues, fixedIssues, initialCheck)
@@ -269,8 +295,7 @@ func runChecks(irmaConfig *irma.Configuration) {
 		go pushToWebHooks(newIssues)
 	}
 
-	issues = confirmedIssues
-	lastCheck = time.Now()
+	setState(confirmedIssues, time.Now())
 }
 
 // confirmIssues applies cross-cycle debouncing. It tracks how many consecutive
@@ -438,7 +463,29 @@ func checkCertificateExpiry() (ret issueEntries) {
 
 func checkCertificateExpiryOf(client *retryablehttp.Client, url string) (ret issueEntries) {
 	log.Printf(" checking certificate expiry on %s", url)
-	resp, err := client.Head(url)
+
+	req, err := retryablehttp.NewRequest(http.MethodHead, url, nil)
+	if err != nil {
+		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: invalid certificate check: %s", url, err)})
+		return
+	}
+
+	// Record per-attempt connection timings so a failure tells us which phase
+	// (DNS, connect, TLS, first byte) was slow or hung, from the pod's vantage.
+	trace := newRequestTrace()
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace.clientTrace()))
+	client.RequestLogHook = func(_ retryablehttp.Logger, _ *http.Request, attempt int) {
+		trace.reset(attempt)
+	}
+	client.CheckRetry = func(ctx context.Context, resp *http.Response, respErr error) (bool, error) {
+		shouldRetry, retErr := retryablehttp.DefaultRetryPolicy(ctx, resp, respErr)
+		if respErr != nil || shouldRetry {
+			logFailedAttempt(http.MethodHead, url, trace, respErr)
+		}
+		return shouldRetry, retErr
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: error %s", url, err)})
 		return

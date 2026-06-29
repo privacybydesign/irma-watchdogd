@@ -24,3 +24,14 @@ go install github.com/privacybydesign/irma-watchdogd
 ```
 
 Create a `config.yaml` (see `config.yaml.example`) and simply run `irma-watchdogd`.
+
+Diagnostics
+-----------
+
+If the watchdog reports hosts as unreachable that look fine from a browser, the
+failure is likely specific to its vantage point (cluster DNS, network path, or
+the pod's CPU budget). `scripts/probe.sh` reproduces the same checks on a tight
+loop and logs per-phase timing (DNS / connect / TLS / first byte) so you can see
+which phase degrades during a blip. Run it from a debug pod in the watchdog's
+namespace and, at the same time, from a workstation, then compare. See the
+header of the script for the exact commands.
