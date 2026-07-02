@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
@@ -57,6 +58,56 @@ func TestRedactURLStripsQueryAndUserinfo(t *testing.T) {
 func TestRedactURLUnparseable(t *testing.T) {
 	if got := redactURL("://not a url"); got != "[redacted]" {
 		t.Errorf("redactURL of an unparseable value = %q, want [redacted]", got)
+	}
+}
+
+// TestRedactErrStripsSecretFromURLError locks in the fix for the network-failure
+// leak: net/http.Get and the Slack client both return errors that embed the full
+// request URL — secret token and all — so the error must be sanitized before it
+// reaches the log, not just the accompanying label.
+func TestRedactErrStripsSecretFromURLError(t *testing.T) {
+	secret := "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+	// Mirrors what net/http.Get produces on a network failure.
+	err := &url.Error{Op: "Get", URL: secret, Err: errors.New("dial tcp: connection refused")}
+
+	// Sanity check: the raw error really does leak the token, otherwise this test
+	// would pass vacuously.
+	if !strings.Contains(err.Error(), "XXXXXXXXXXXXXXXXXXXXXXXX") {
+		t.Fatalf("precondition failed: raw error did not embed the secret: %q", err.Error())
+	}
+
+	got := redactErr(err, secret)
+	if strings.Contains(got, "XXXXXXXXXXXXXXXXXXXXXXXX") {
+		t.Errorf("redactErr leaked the secret token: %q", got)
+	}
+	if !strings.Contains(got, "connection refused") {
+		t.Errorf("redactErr should keep the diagnostic detail, got %q", got)
+	}
+	if !strings.Contains(got, "hooks.slack.com") {
+		t.Errorf("redactErr should keep scheme+host for debugging, got %q", got)
+	}
+}
+
+func TestRedactErrNil(t *testing.T) {
+	if got := redactErr(nil, "https://example.com/x"); got != "" {
+		t.Errorf("redactErr(nil) = %q, want empty string", got)
+	}
+}
+
+// TestRedactErrsStripsSecret covers the Slack path, whose client returns a slice
+// of errors that each embed the request URL.
+func TestRedactErrsStripsSecret(t *testing.T) {
+	secret := "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+	errs := []error{
+		&url.Error{Op: "Post", URL: secret, Err: errors.New("EOF")},
+		errors.New("giving up after 3 attempts"),
+	}
+	got := redactErrs(errs, secret)
+	if strings.Contains(got, "XXXXXXXXXXXXXXXXXXXXXXXX") {
+		t.Errorf("redactErrs leaked the secret token: %q", got)
+	}
+	if !strings.Contains(got, "giving up after 3 attempts") {
+		t.Errorf("redactErrs should keep non-URL errors, got %q", got)
 	}
 }
 

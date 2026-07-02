@@ -279,7 +279,7 @@ func pushToWebHooks(newIssues issueEntries) {
 			u := strings.Replace(bareURL, "%s", url.QueryEscape("Watchdog: "+msg), 1)
 			res, err := http.Get(u)
 			if err != nil {
-				log.Printf("Webhook %s: %s", redactURL(u), err)
+				log.Printf("Webhook %s: %s", redactURL(u), redactErr(err, u))
 				return
 			}
 			body, err := io.ReadAll(res.Body)
@@ -362,7 +362,7 @@ func pushMessageToSlack(message string, attachments []slack.Attachment) {
 		if err := slack.Send(url, "", payload); err != nil {
 			// The Slack webhook URL embeds a secret token in its path, so only
 			// log a redacted form of it on failure.
-			log.Printf("SlackWebhook %s: %s", redactURL(url), err)
+			log.Printf("SlackWebhook %s: %s", redactURL(url), redactErrs(err, url))
 			continue
 		}
 	}
