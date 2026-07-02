@@ -125,7 +125,7 @@ func generateHealthCheckIssueEntry(check HealthCheck, resp *http.Response, respE
 	}
 
 	if !strings.Contains(string(respBody), check.ResponseBodyContains) {
-		log.Printf("response body %q should contain %q, but it was not found", string(respBody), check.ResponseBodyContains)
+		log.Printf("response body %q should contain %q, but it was not found", truncateForLog(string(respBody)), check.ResponseBodyContains)
 		return &issueEntry{danger, fmt.Sprintf("%s: expected response body \"%s\" could not be found", check.RequestURL, check.ResponseBodyContains)}
 	}
 	return nil
