@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/go-retryablehttp"
@@ -32,6 +33,38 @@ func redactURL(raw string) string {
 		return "[redacted]"
 	}
 	return u.Scheme + "://" + u.Host + "/[redacted]"
+}
+
+// redactErr returns err's message with every occurrence of rawURL replaced by
+// its redacted form. Network failures surface the request URL inside the error
+// itself — the stdlib returns a *url.Error whose message is `Get "<url>": ...`
+// and the Slack client (gorequest) wraps net/http similarly — so logging err
+// verbatim leaks the secret webhook token even when the accompanying label is
+// already redacted. Callers must pass the exact URL string they handed to the
+// HTTP call so it can be matched and stripped.
+func redactErr(err error, rawURL string) string {
+	if err == nil {
+		return ""
+	}
+	return redactURLIn(err.Error(), rawURL)
+}
+
+// redactErrs is the []error counterpart of redactErr, used for the Slack client
+// whose Send returns a slice. Each error is sanitized and joined, so a leaked
+// URL in any element is stripped.
+func redactErrs(errs []error, rawURL string) string {
+	msgs := make([]string, 0, len(errs))
+	for _, err := range errs {
+		if err != nil {
+			msgs = append(msgs, redactURLIn(err.Error(), rawURL))
+		}
+	}
+	return strings.Join(msgs, "; ")
+}
+
+// redactURLIn replaces every occurrence of rawURL in s with its redacted form.
+func redactURLIn(s, rawURL string) string {
+	return strings.ReplaceAll(s, rawURL, redactURL(rawURL))
 }
 
 func newHTTPClient() *retryablehttp.Client {
