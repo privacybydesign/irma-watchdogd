@@ -23,9 +23,13 @@ bindaddr: ':8079'
 interval: 5m
 
 # Number of consecutive check cycles an issue must be observed before it is
-# reported to Slack/webhooks. Higher values suppress transient blips (a host
-# briefly unreachable) at the cost of slower alerting on real outages.
-# Defaults to 3. Set to 1 to alert on the first failed cycle (old behaviour).
+# reported to Slack/webhooks. The debounce is symmetric: a confirmed issue must
+# likewise be absent for this many consecutive cycles before it is reported as
+# fixed, so a brief recovery blip does not trigger a premature "fixed" alert.
+# Higher values suppress transient blips (a host briefly unreachable, or a
+# confirmed outage briefly flapping to OK) at the cost of slower alerting on real
+# state changes. Defaults to 3. Set to 1 to alert on the first changed cycle
+# (old behaviour).
 failurethreshold: 3
 
 webhooks:

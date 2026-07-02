@@ -90,6 +90,20 @@ var (
 	// cycles it has been observed. Used to debounce transient blips.
 	failureStreaks = map[string]int{}
 
+	// recoveryStreaks tracks, per confirmed issue message, how many consecutive
+	// check cycles it has been ABSENT. It mirrors failureStreaks for the recovery
+	// direction: a confirmed issue is only reported fixed once its recovery streak
+	// reaches conf.FailureThreshold, so a genuine outage that briefly flaps to OK
+	// for a cycle or two is not prematurely reported as fixed and then re-alerted.
+	recoveryStreaks = map[string]int{}
+
+	// confirmedSet holds the currently-confirmed (reported) issues, keyed by
+	// message. An issue enters this set once its failure streak reaches the
+	// threshold and only leaves it once its recovery streak reaches the threshold;
+	// while it is recovering it stays in the set so the status page and alerts stay
+	// stable. This is the debounced set the new/fixed diff runs against.
+	confirmedSet = map[string]issueEntry{}
+
 	// cycleCount counts how many check cycles have run since (re)start. It drives
 	// the initialCheck window: an issue present from the very first cycle is only
 	// confirmed once its streak reaches conf.FailureThreshold (i.e. at cycle
@@ -131,7 +145,7 @@ type Conf struct {
 	Interval               time.Duration
 	SlackWebhooks          []string
 	WebHooks               []string
-	FailureThreshold       int // consecutive cycles an issue must persist before it is reported
+	FailureThreshold       int // consecutive cycles an issue must persist before it is reported (and be absent before it is reported fixed)
 }
 
 func main() {
@@ -278,9 +292,12 @@ func runChecks(irmaConfig *irma.Configuration) {
 
 	logCurrentIssues(curIssues.messages())
 
-	// Debounce transient blips: only treat an issue as confirmed once it has
-	// been observed for conf.FailureThreshold consecutive cycles. A host that is
-	// briefly unreachable and recovers within a cycle or two is never reported.
+	// Debounce transient blips in both directions: an issue is only treated as
+	// confirmed once it has been observed for conf.FailureThreshold consecutive
+	// cycles, and a confirmed issue is only treated as fixed once it has been
+	// absent for that many consecutive cycles. A host that is briefly unreachable
+	// (or a confirmed outage that briefly flaps to OK) within a cycle or two
+	// therefore produces no alert churn at all.
 	confirmedIssues := confirmIssues(curIssues)
 
 	prevIssues, _ := currentState()
@@ -298,45 +315,96 @@ func runChecks(irmaConfig *irma.Configuration) {
 	setState(confirmedIssues, time.Now())
 }
 
-// confirmIssues applies cross-cycle debouncing. It tracks how many consecutive
-// cycles each issue (keyed by message) has been observed and returns only those
-// that have reached conf.FailureThreshold. Issues that are absent this cycle
-// have their streak reset, so a recovered blip starts counting from scratch if
-// it ever returns.
+// confirmIssues applies symmetric cross-cycle debouncing and returns the current
+// confirmed set. An issue is confirmed (and thus reported as new) once it has
+// been observed for conf.FailureThreshold consecutive cycles; a confirmed issue
+// is only dropped (and thus reported as fixed) once it has been absent for that
+// many consecutive cycles. While an issue is recovering it stays in the set, so
+// neither a transient failure blip nor a transient recovery blip produces alert
+// churn. The full confirmed set is returned each cycle; runChecks diffs it
+// against the previous confirmed set to derive the new/fixed alerts.
 func confirmIssues(curIssues issueEntries) (confirmed issueEntries) {
-	curMessages := make(map[string]bool, len(curIssues))
+	// De-duplicate the current cycle's messages (keeping the first entry per
+	// message), so two entries with the same message (e.g. duplicate health
+	// checks on one URL) can't advance a streak twice or land in confirmed twice.
+	curEntries := make(map[string]issueEntry, len(curIssues))
+	var order []string
 	for _, issue := range curIssues {
-		curMessages[issue.message] = true
-	}
-
-	// Reset streaks for issues that are no longer present.
-	for msg := range failureStreaks {
-		if !curMessages[msg] {
-			delete(failureStreaks, msg)
-		}
-	}
-
-	// Count each distinct message at most once per cycle, so two entries with
-	// the same message (e.g. duplicate health checks on one URL) can't advance
-	// the streak twice or land in confirmed twice.
-	var pending []string
-	counted := make(map[string]bool, len(curIssues))
-	for _, issue := range curIssues {
-		if counted[issue.message] {
+		if _, seen := curEntries[issue.message]; seen {
 			continue
 		}
-		counted[issue.message] = true
+		curEntries[issue.message] = issue
+		order = append(order, issue.message)
+	}
 
-		failureStreaks[issue.message]++
-		if failureStreaks[issue.message] >= conf.FailureThreshold {
-			confirmed = append(confirmed, issue)
+	var pending, recovering []string
+
+	// Present issues: clear any recovery streak and advance the failure streak.
+	// Confirm once the threshold is reached; refresh the stored entry for issues
+	// that are already confirmed (their level may have changed).
+	for _, msg := range order {
+		delete(recoveryStreaks, msg)
+		if _, ok := confirmedSet[msg]; ok {
+			confirmedSet[msg] = curEntries[msg]
+			continue
+		}
+		failureStreaks[msg]++
+		if failureStreaks[msg] >= conf.FailureThreshold {
+			confirmedSet[msg] = curEntries[msg]
 		} else {
-			pending = append(pending, fmt.Sprintf("%s (%d/%d)", issue.message, failureStreaks[issue.message], conf.FailureThreshold))
+			pending = append(pending, fmt.Sprintf("%s (%d/%d)", msg, failureStreaks[msg], conf.FailureThreshold))
+		}
+	}
+
+	// Unconfirmed issues that are absent this cycle: a blip that never reached the
+	// threshold and is now gone; reset its failure streak so it counts from
+	// scratch if it ever returns.
+	for msg := range failureStreaks {
+		if _, present := curEntries[msg]; present {
+			continue
+		}
+		if _, ok := confirmedSet[msg]; ok {
+			continue
+		}
+		delete(failureStreaks, msg)
+	}
+
+	// Confirmed issues that are absent this cycle: advance the recovery streak and
+	// only drop them from the confirmed set (reporting them fixed) once it reaches
+	// the threshold, mirroring the failure debounce.
+	for msg := range confirmedSet {
+		if _, present := curEntries[msg]; present {
+			continue
+		}
+		recoveryStreaks[msg]++
+		if recoveryStreaks[msg] >= conf.FailureThreshold {
+			delete(confirmedSet, msg)
+			delete(failureStreaks, msg)
+			delete(recoveryStreaks, msg)
+		} else {
+			recovering = append(recovering, fmt.Sprintf("%s (%d/%d)", msg, recoveryStreaks[msg], conf.FailureThreshold))
 		}
 	}
 
 	if len(pending) > 0 {
 		log.Printf("Pending issues (awaiting confirmation):\n%s", strings.Join(pending, "\n"))
+	}
+	if len(recovering) > 0 {
+		log.Printf("Recovering issues (awaiting fixed confirmation):\n%s", strings.Join(recovering, "\n"))
+	}
+
+	// Return the full confirmed set: current-cycle entries first (in detection
+	// order) for stable output, then any confirmed issues that are recovering.
+	for _, msg := range order {
+		if entry, ok := confirmedSet[msg]; ok {
+			confirmed = append(confirmed, entry)
+		}
+	}
+	for msg, entry := range confirmedSet {
+		if _, present := curEntries[msg]; present {
+			continue
+		}
+		confirmed = append(confirmed, entry)
 	}
 
 	return
