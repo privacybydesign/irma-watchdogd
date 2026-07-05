@@ -274,13 +274,17 @@ func pushToWebHooks(newIssues issueEntries) {
 			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
 			res, err := http.Get(u)
 			if err != nil {
+				// Log and move on: a single unreachable or failing endpoint
+				// must not prevent delivery to the remaining webhooks (or the
+				// remaining alerts).
 				log.Printf("Webhook %s: %s", u, err)
-				return
+				continue
 			}
 			body, err := io.ReadAll(res.Body)
+			res.Body.Close()
 			if err != nil {
 				log.Printf("Webhook response body error: %s", err)
-				return
+				continue
 			}
 			if len(body) != 0 {
 				log.Printf("Webhook response body: %s", string(body))
