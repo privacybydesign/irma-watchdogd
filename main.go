@@ -267,26 +267,42 @@ func runChecks(irmaConfig *irma.Configuration) {
 	initialCheck = false
 }
 
+// webHookClient bounds webhook delivery with a timeout so that a slow or
+// unreachable endpoint can't block the delivery goroutine indefinitely,
+// consistent with the retryablehttp client used elsewhere (see newHTTPClient).
+var webHookClient = &http.Client{Timeout: 10 * time.Second}
+
 func pushToWebHooks(newIssues issueEntries) {
 	dangers := newIssues.filter(danger)
 	for _, msg := range dangers {
 		for _, bareURL := range conf.WebHooks {
 			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
-			res, err := http.Get(u)
-			if err != nil {
-				log.Printf("Webhook %s: %s", u, err)
+			if !sendWebHook(u) {
 				return
-			}
-			body, err := io.ReadAll(res.Body)
-			if err != nil {
-				log.Printf("Webhook response body error: %s", err)
-				return
-			}
-			if len(body) != 0 {
-				log.Printf("Webhook response body: %s", string(body))
 			}
 		}
 	}
+}
+
+// sendWebHook performs a single webhook request and reports whether it
+// succeeded. It closes the response body so that repeated alerts don't leak
+// TCP connections (and file descriptors) back to the OS.
+func sendWebHook(u string) bool {
+	res, err := webHookClient.Get(u)
+	if err != nil {
+		log.Printf("Webhook %s: %s", u, err)
+		return false
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Printf("Webhook response body error: %s", err)
+		return false
+	}
+	if len(body) != 0 {
+		log.Printf("Webhook response body: %s", string(body))
+	}
+	return true
 }
 
 func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
