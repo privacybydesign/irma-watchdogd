@@ -24,14 +24,13 @@ func confirmedMessages(cur issueEntries) []string {
 func TestConfirmIssuesSuppressesSingleCycleBlip(t *testing.T) {
 	resetDebounceState(3)
 
-	// A blip that appears for one cycle and then recovers must never be confirmed.
 	if got := confirmedMessages(issueEntries{issue("yivi.app: cannot be reached")}); len(got) != 0 {
 		t.Fatalf("cycle 1: expected nothing confirmed, got %v", got)
 	}
 	if got := confirmedMessages(issueEntries{}); len(got) != 0 {
 		t.Fatalf("cycle 2 (recovered): expected nothing confirmed, got %v", got)
 	}
-	// Streak must have been reset, so the issue counts from scratch if it returns.
+	// Streak reset, so the issue counts from scratch on return.
 	if got := confirmedMessages(issueEntries{issue("yivi.app: cannot be reached")}); len(got) != 0 {
 		t.Fatalf("cycle 3 (returned): expected nothing confirmed, got %v", got)
 	}
@@ -46,7 +45,7 @@ func TestConfirmIssuesReportsPersistentIssue(t *testing.T) {
 			t.Fatalf("cycle %d: expected not yet confirmed, got %v", cycle, got)
 		}
 	}
-	// Third consecutive cycle: the threshold is reached and the issue is confirmed.
+	// Threshold reached on the third consecutive cycle.
 	got := confirmedMessages(issueEntries{issue(msg)})
 	if len(got) != 1 || got[0] != msg {
 		t.Fatalf("cycle 3: expected %q confirmed, got %v", msg, got)
@@ -57,9 +56,7 @@ func TestConfirmIssuesDeduplicatesMessagesWithinCycle(t *testing.T) {
 	resetDebounceState(3)
 
 	msg := "yivi.app: cannot be reached"
-	// Two entries with the same message in a single cycle (e.g. duplicate health
-	// checks on one URL) must advance the streak by one, not two, and must not
-	// land in the confirmed set twice.
+	// Duplicate entries in one cycle must advance the streak by one, not two.
 	dup := issueEntries{issue(msg), issue(msg)}
 
 	for cycle := 1; cycle <= 2; cycle++ {
@@ -67,8 +64,6 @@ func TestConfirmIssuesDeduplicatesMessagesWithinCycle(t *testing.T) {
 			t.Fatalf("cycle %d: expected not yet confirmed, got %v", cycle, got)
 		}
 	}
-	// Only on the third consecutive cycle does the streak reach the threshold,
-	// and the message is confirmed exactly once.
 	got := confirmedMessages(dup)
 	if len(got) != 1 || got[0] != msg {
 		t.Fatalf("cycle 3: expected %q confirmed exactly once, got %v", msg, got)
@@ -85,9 +80,7 @@ func TestConfirmIssuesThresholdOneAlertsImmediately(t *testing.T) {
 	}
 }
 
-// TestDebounceEndToEnd mirrors the runChecks reporting loop: an issue should be
-// reported as "new" only once confirmed, and a transient blip should produce no
-// new/fixed churn at all.
+// TestDebounceEndToEnd mirrors the runChecks reporting loop.
 func TestDebounceEndToEnd(t *testing.T) {
 	resetDebounceState(2)
 
@@ -101,16 +94,16 @@ func TestDebounceEndToEnd(t *testing.T) {
 
 	blip := "yivi.app: cannot be reached"
 
-	// Cycle 1: blip detected but not yet confirmed -> no alert.
+	// Blip: detected then recovered within the threshold -> no churn.
 	if n, f := step(issueEntries{issue(blip)}); len(n) != 0 || len(f) != 0 {
 		t.Fatalf("cycle 1: expected no churn, got new=%v fixed=%v", n, f)
 	}
-	// Cycle 2: blip recovered -> still no alert and nothing to mark fixed.
 	if n, f := step(issueEntries{}); len(n) != 0 || len(f) != 0 {
 		t.Fatalf("cycle 2: expected no churn, got new=%v fixed=%v", n, f)
 	}
 
-	// Now a genuinely persistent issue across two cycles.
+	// Persistent issue: reported new only once confirmed, fixed only once absent
+	// for the threshold.
 	persistent := "keyshare.yivi.app: cannot be reached"
 	if n, _ := step(issueEntries{issue(persistent)}); len(n) != 0 {
 		t.Fatalf("cycle 3: expected not yet reported, got new=%v", n)
@@ -119,30 +112,23 @@ func TestDebounceEndToEnd(t *testing.T) {
 	if len(n) != 1 || n[0].message != persistent {
 		t.Fatalf("cycle 4: expected %q reported as new, got %v", persistent, n.messages())
 	}
-	// Recovery is debounced symmetrically: the first absent cycle must not report
-	// the issue as fixed yet (it might just be a recovery blip).
 	if n, f := step(issueEntries{}); len(n) != 0 || len(f) != 0 {
 		t.Fatalf("cycle 5: expected no churn on first absent cycle, got new=%v fixed=%v", n.messages(), f.messages())
 	}
-	// Only once the issue has been absent for FailureThreshold cycles is it
-	// reported as fixed, exactly once.
 	_, f := step(issueEntries{})
 	if len(f) != 1 || f[0].message != persistent {
 		t.Fatalf("cycle 6: expected %q reported as fixed, got %v", persistent, f.messages())
 	}
 }
 
-// TestConfirmIssuesDebouncesSingleCycleRecoveryBlip verifies the recovery
-// direction of the debounce: a confirmed issue that flaps to OK for a single
-// cycle (shorter than the threshold) stays confirmed and is never prematurely
-// reported as fixed.
+// TestConfirmIssuesDebouncesSingleCycleRecoveryBlip: a confirmed issue that
+// flaps to OK for a single cycle stays confirmed.
 func TestConfirmIssuesDebouncesSingleCycleRecoveryBlip(t *testing.T) {
 	resetDebounceState(3)
 
 	msg := "keyshare.yivi.app: cannot be reached"
 	present := issueEntries{issue(msg)}
 
-	// Confirm the issue (present for FailureThreshold cycles).
 	for cycle := 1; cycle <= 3; cycle++ {
 		confirmedMessages(present)
 	}
@@ -156,7 +142,7 @@ func TestConfirmIssuesDebouncesSingleCycleRecoveryBlip(t *testing.T) {
 		t.Fatalf("recovery blip: expected %q to remain confirmed, got %v", msg, got)
 	}
 
-	// It returns; the recovery streak resets and it stays confirmed throughout.
+	// On return the recovery streak resets.
 	got = confirmedMessages(present)
 	if len(got) != 1 || got[0] != msg {
 		t.Fatalf("returned: expected %q to remain confirmed, got %v", msg, got)
@@ -166,9 +152,8 @@ func TestConfirmIssuesDebouncesSingleCycleRecoveryBlip(t *testing.T) {
 	}
 }
 
-// TestConfirmIssuesReportsFixedAfterThreshold verifies that a confirmed issue is
-// dropped from the confirmed set (and thus reported as fixed) only once it has
-// been absent for FailureThreshold consecutive cycles.
+// TestConfirmIssuesReportsFixedAfterThreshold: a confirmed issue is dropped only
+// once absent for FailureThreshold consecutive cycles.
 func TestConfirmIssuesReportsFixedAfterThreshold(t *testing.T) {
 	resetDebounceState(3)
 
@@ -192,7 +177,6 @@ func TestConfirmIssuesReportsFixedAfterThreshold(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("absent cycle 3: expected %q dropped from confirmed set, got %v", msg, got)
 	}
-	// All state for the message is cleaned up.
 	if _, ok := failureStreaks[msg]; ok {
 		t.Fatalf("expected failure streak cleaned up after fixed confirmation")
 	}
@@ -201,26 +185,22 @@ func TestConfirmIssuesReportsFixedAfterThreshold(t *testing.T) {
 	}
 }
 
-// stepInitialWindow mirrors the initialCheck bookkeeping at the top of runChecks
-// and returns whether the cycle is treated as initial.
+// stepInitialWindow mirrors the initialCheck bookkeeping in runChecks.
 func stepInitialWindow() bool {
 	cycleCount++
 	initialCheck = cycleCount <= conf.FailureThreshold
 	return initialCheck
 }
 
-// TestInitialCheckWindowCoversDebounceDelay verifies that the initialCheck
-// window stays open long enough for a startup-present issue to be confirmed.
-// Under debouncing such an issue only surfaces on cycle == FailureThreshold, so
-// closing the window after the first cycle (the previous behaviour) would let a
-// restart-time outage page as brand new and kill the restart Slack preamble.
+// TestInitialCheckWindowCoversDebounceDelay: the initialCheck window must stay
+// open until a startup-present issue is confirmed (on cycle FailureThreshold),
+// else a restart-time outage would page as brand new.
 func TestInitialCheckWindowCoversDebounceDelay(t *testing.T) {
 	resetDebounceState(3)
 
 	startupIssue := "yivi.app: cannot be reached"
 
-	// Cycles 1 and 2: the issue is detected but not yet confirmed; the window
-	// must remain open so it is still considered initial once it is confirmed.
+	// Cycles 1 and 2: detected but not yet confirmed; window stays open.
 	for cycle := 1; cycle <= 2; cycle++ {
 		initial := stepInitialWindow()
 		if got := confirmedMessages(issueEntries{issue(startupIssue)}); len(got) != 0 {
@@ -231,9 +211,7 @@ func TestInitialCheckWindowCoversDebounceDelay(t *testing.T) {
 		}
 	}
 
-	// Cycle 3: the startup issue is confirmed for the first time and must still
-	// be flagged initial, so it is suppressed from webhooks and the restart
-	// preamble fires.
+	// Cycle 3: startup issue first confirmed, still flagged initial.
 	initial := stepInitialWindow()
 	got := confirmedMessages(issueEntries{issue(startupIssue)})
 	if len(got) != 1 || got[0] != startupIssue {
@@ -243,16 +221,14 @@ func TestInitialCheckWindowCoversDebounceDelay(t *testing.T) {
 		t.Fatalf("cycle 3: expected initialCheck to be true when the startup issue is first confirmed")
 	}
 
-	// Cycle 4 onwards: the startup window is closed; a genuinely new issue that
-	// appears later must page normally (not be treated as a restart artefact).
+	// Cycle 4: the startup window is closed.
 	if initial := stepInitialWindow(); initial {
 		t.Fatalf("cycle 4: expected initialCheck to be false once the startup window has passed")
 	}
 }
 
-// TestInitialCheckThresholdOneMatchesOldBehaviour confirms that with
-// FailureThreshold == 1 only the very first cycle is initial, exactly
-// reproducing the pre-debounce semantics.
+// TestInitialCheckThresholdOneMatchesOldBehaviour: with FailureThreshold 1 only
+// the first cycle is initial.
 func TestInitialCheckThresholdOneMatchesOldBehaviour(t *testing.T) {
 	resetDebounceState(1)
 
