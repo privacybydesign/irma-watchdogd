@@ -388,7 +388,10 @@ func pushToWebHooks(newIssues issueEntries) {
 		for _, bareURL := range conf.WebHooks {
 			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
 			if !sendWebHook(u) {
-				return
+				// Log and move on: a single unreachable or failing endpoint
+				// must not prevent delivery to the remaining webhooks (or the
+				// remaining alerts).
+				continue
 			}
 		}
 	}

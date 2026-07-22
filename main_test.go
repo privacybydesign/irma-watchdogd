@@ -58,6 +58,8 @@ func TestSendWebHookRespectsTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("sendWebHook did not respect timeout, took %s", elapsed)
+	}
+}
 
 // resetDebounceState clears the global debounce state between test cases.
 func resetDebounceState(threshold int) {
