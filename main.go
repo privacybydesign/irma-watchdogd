@@ -86,6 +86,16 @@ var (
 	initialCheck   bool
 	parsedTemplate *template.Template
 
+	// Cross-cycle debounce state, keyed by issue message. failureStreaks/
+	// recoveryStreaks count consecutive cycles an issue is present/absent;
+	// confirmedSet is the reported set that new/fixed alerts diff against.
+	failureStreaks  = map[string]int{}
+	recoveryStreaks = map[string]int{}
+	confirmedSet    = map[string]issueEntry{}
+
+	// cycleCount drives the initialCheck window (see runChecks).
+	cycleCount int
+
 	// stateMu guards the mutable state shared between the background check
 	// goroutine (writer) and the HTTP handler (reader). Without it the handler
 	// races the checker on every cycle, which can produce a torn read and crash
@@ -120,6 +130,7 @@ type Conf struct {
 	Interval               time.Duration
 	SlackWebhooks          []string
 	WebHooks               []string
+	FailureThreshold       int // consecutive cycles an issue must persist (or be absent) before it is reported new (or fixed)
 }
 
 func main() {
@@ -128,6 +139,7 @@ func main() {
 	// set configuration defaults
 	conf.BindAddr = ":8080"
 	conf.Interval = 5 * time.Minute
+	conf.FailureThreshold = 3
 
 	// parse commandline
 	flag.StringVar(&confPath, "config", "config.yaml",
@@ -152,6 +164,11 @@ func main() {
 
 	if err := yaml.Unmarshal(buf, &conf); err != nil {
 		log.Fatalf("Could not parse config file: %s", err)
+	}
+
+	// Threshold 1 reproduces the old alert-immediately behaviour; lower is meaningless.
+	if conf.FailureThreshold < 1 {
+		conf.FailureThreshold = 1
 	}
 
 	// Load IRMA configuration
@@ -193,7 +210,6 @@ func main() {
 	ticker = time.NewTicker(conf.Interval)
 
 	go func() {
-		initialCheck = true
 		for {
 			runChecks(irmaConfig)
 			<-ticker.C
@@ -243,6 +259,12 @@ func difference(old, cur issueEntries) (came, gone issueEntries) {
 func runChecks(irmaConfig *irma.Configuration) {
 	var curIssues issueEntries
 
+	// Keep initialCheck open for the first FailureThreshold cycles: a startup
+	// outage is only confirmed on cycle FailureThreshold, and must still be
+	// treated as a restart artefact (suppressed from webhooks) rather than new.
+	cycleCount++
+	initialCheck = cycleCount <= conf.FailureThreshold
+
 	log.Println("Running checks ...")
 	curIssues = append(curIssues, checkSchemeManagers(irmaConfig)...)
 	curIssues = append(curIssues, checkCertificateExpiry()...)
@@ -251,8 +273,10 @@ func runChecks(irmaConfig *irma.Configuration) {
 
 	logCurrentIssues(curIssues.messages())
 
+	confirmedIssues := confirmIssues(curIssues)
+
 	prevIssues, _ := currentState()
-	newIssues, fixedIssues := difference(prevIssues, curIssues)
+	newIssues, fixedIssues := difference(prevIssues, confirmedIssues)
 
 	if len(conf.SlackWebhooks) > 0 {
 		go pushToSlack(newIssues, fixedIssues, initialCheck)
@@ -263,9 +287,100 @@ func runChecks(irmaConfig *irma.Configuration) {
 		go pushToWebHooks(newIssues)
 	}
 
-	setState(curIssues, time.Now())
-	initialCheck = false
+	setState(confirmedIssues, time.Now())
 }
+
+// confirmIssues applies symmetric cross-cycle debouncing and returns the current
+// confirmed set: an issue is confirmed once present for FailureThreshold
+// consecutive cycles, and dropped once absent for that many, so transient blips
+// in either direction produce no alert churn. runChecks diffs the returned set
+// against the previous one to derive new/fixed alerts.
+func confirmIssues(curIssues issueEntries) (confirmed issueEntries) {
+	// De-duplicate per message so duplicate entries can't advance a streak twice.
+	curEntries := make(map[string]issueEntry, len(curIssues))
+	var order []string
+	for _, issue := range curIssues {
+		if _, seen := curEntries[issue.message]; seen {
+			continue
+		}
+		curEntries[issue.message] = issue
+		order = append(order, issue.message)
+	}
+
+	var pending, recovering []string
+
+	// Present issues: reset recovery streak, advance failure streak, and confirm
+	// once the threshold is reached (refreshing already-confirmed entries).
+	for _, msg := range order {
+		delete(recoveryStreaks, msg)
+		if _, ok := confirmedSet[msg]; ok {
+			confirmedSet[msg] = curEntries[msg]
+			continue
+		}
+		failureStreaks[msg]++
+		if failureStreaks[msg] >= conf.FailureThreshold {
+			confirmedSet[msg] = curEntries[msg]
+		} else {
+			pending = append(pending, fmt.Sprintf("%s (%d/%d)", msg, failureStreaks[msg], conf.FailureThreshold))
+		}
+	}
+
+	// Unconfirmed and now absent: a blip that never reached the threshold; reset
+	// its failure streak so it counts from scratch if it returns.
+	for msg := range failureStreaks {
+		if _, present := curEntries[msg]; present {
+			continue
+		}
+		if _, ok := confirmedSet[msg]; ok {
+			continue
+		}
+		delete(failureStreaks, msg)
+	}
+
+	// Confirmed but now absent: advance the recovery streak and only drop (report
+	// fixed) once it reaches the threshold, mirroring the failure debounce.
+	for msg := range confirmedSet {
+		if _, present := curEntries[msg]; present {
+			continue
+		}
+		recoveryStreaks[msg]++
+		if recoveryStreaks[msg] >= conf.FailureThreshold {
+			delete(confirmedSet, msg)
+			delete(failureStreaks, msg)
+			delete(recoveryStreaks, msg)
+		} else {
+			recovering = append(recovering, fmt.Sprintf("%s (%d/%d)", msg, recoveryStreaks[msg], conf.FailureThreshold))
+		}
+	}
+
+	if len(pending) > 0 {
+		log.Printf("Pending issues (awaiting confirmation):\n%s", strings.Join(pending, "\n"))
+	}
+	if len(recovering) > 0 {
+		log.Printf("Recovering issues (awaiting fixed confirmation):\n%s", strings.Join(recovering, "\n"))
+	}
+
+	// Return the full confirmed set: current-cycle entries first (in detection
+	// order) for stable output, then recovering ones.
+	for _, msg := range order {
+		if entry, ok := confirmedSet[msg]; ok {
+			confirmed = append(confirmed, entry)
+		}
+	}
+	for msg, entry := range confirmedSet {
+		if _, present := curEntries[msg]; present {
+			continue
+		}
+		confirmed = append(confirmed, entry)
+	}
+
+	return
+}
+
+// webHookClient bounds webhook delivery with a timeout so that a slow or
+// unreachable endpoint can't block the delivery goroutine indefinitely,
+// consistent with the retryablehttp client used elsewhere (see newHTTPClient).
+var webHookClient = &http.Client{Timeout: 10 * time.Second}
 
 func pushToWebHooks(newIssues issueEntries) {
 	dangers := newIssues.filter(danger)
@@ -277,21 +392,35 @@ func pushToWebHooks(newIssues issueEntries) {
 			// which would misbehave on stray "%" characters and is a format
 			// string injection risk.
 			u := strings.Replace(bareURL, "%s", url.QueryEscape("Watchdog: "+msg), 1)
-			res, err := http.Get(u)
-			if err != nil {
-				log.Printf("Webhook %s: %s", redactURL(u), redactErr(err, u))
-				return
-			}
-			body, err := io.ReadAll(res.Body)
-			if err != nil {
-				log.Printf("Webhook response body error: %s", err)
-				return
-			}
-			if len(body) != 0 {
-				log.Printf("Webhook response body: %s", truncateForLog(string(body)))
+			if !sendWebHook(u) {
+				// Log and move on: a single unreachable or failing endpoint
+				// must not prevent delivery to the remaining webhooks (or the
+				// remaining alerts).
+				continue
 			}
 		}
 	}
+}
+
+// sendWebHook performs a single webhook request and reports whether it
+// succeeded. It closes the response body so that repeated alerts don't leak
+// TCP connections (and file descriptors) back to the OS.
+func sendWebHook(u string) bool {
+	res, err := webHookClient.Get(u)
+	if err != nil {
+		log.Printf("Webhook %s: %s", redactURL(u), redactErr(err, u))
+		return false
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Printf("Webhook response body error: %s", err)
+		return false
+	}
+	if len(body) != 0 {
+		log.Printf("Webhook response body: %s", truncateForLog(string(body)))
+	}
+	return true
 }
 
 func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {

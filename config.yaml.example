@@ -22,5 +22,10 @@ healthchecks:
 bindaddr: ':8079'
 interval: 5m
 
+# Consecutive check cycles an issue must persist before it is reported (and be
+# absent before it is reported fixed). Higher values suppress transient blips at
+# the cost of slower alerting. Defaults to 3; 1 alerts on the first cycle.
+failurethreshold: 3
+
 webhooks:
     - https://example.com/?message=%s
