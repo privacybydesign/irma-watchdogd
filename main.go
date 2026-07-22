@@ -386,7 +386,12 @@ func pushToWebHooks(newIssues issueEntries) {
 	dangers := newIssues.filter(danger)
 	for _, msg := range dangers {
 		for _, bareURL := range conf.WebHooks {
-			u := fmt.Sprintf(bareURL, url.QueryEscape("Watchdog: "+msg))
+			// The configured webhook URL is a template containing a literal
+			// "%s" placeholder for the message. Substitute it directly instead
+			// of treating the operator-controlled URL as a fmt format string,
+			// which would misbehave on stray "%" characters and is a format
+			// string injection risk.
+			u := strings.Replace(bareURL, "%s", url.QueryEscape("Watchdog: "+msg), 1)
 			if !sendWebHook(u) {
 				// Log and move on: a single unreachable or failing endpoint
 				// must not prevent delivery to the remaining webhooks (or the
@@ -403,7 +408,7 @@ func pushToWebHooks(newIssues issueEntries) {
 func sendWebHook(u string) bool {
 	res, err := webHookClient.Get(u)
 	if err != nil {
-		log.Printf("Webhook %s: %s", u, err)
+		log.Printf("Webhook %s: %s", redactURL(u), redactErr(err, u))
 		return false
 	}
 	defer res.Body.Close()
@@ -413,7 +418,7 @@ func sendWebHook(u string) bool {
 		return false
 	}
 	if len(body) != 0 {
-		log.Printf("Webhook response body: %s", string(body))
+		log.Printf("Webhook response body: %s", truncateForLog(string(body)))
 	}
 	return true
 }
@@ -484,7 +489,9 @@ func pushMessageToSlack(message string, attachments []slack.Attachment) {
 			Attachments: attachments,
 		}
 		if err := slack.Send(url, "", payload); err != nil {
-			log.Printf("SlackWebhook %s: %s", url, err)
+			// The Slack webhook URL embeds a secret token in its path, so only
+			// log a redacted form of it on failure.
+			log.Printf("SlackWebhook %s: %s", redactURL(url), redactErrs(err, url))
 			continue
 		}
 	}
