@@ -126,6 +126,7 @@ type Conf struct {
 	BindAddr               string            // port to bind to
 	CheckCertificateExpiry []string
 	CheckAtumServers       []string
+	CheckRootAnchors       string // URL of the IANA root trust anchors XML to watch (empty disables the check)
 	HealthChecks           []HealthCheck
 	Interval               time.Duration
 	SlackWebhooks          []string
@@ -269,6 +270,7 @@ func runChecks(irmaConfig *irma.Configuration) {
 	curIssues = append(curIssues, checkSchemeManagers(irmaConfig)...)
 	curIssues = append(curIssues, checkCertificateExpiry()...)
 	curIssues = append(curIssues, checkAtumServers()...)
+	curIssues = append(curIssues, checkRootAnchors()...)
 	curIssues = append(curIssues, runHealthChecks(conf.HealthChecks)...)
 
 	logCurrentIssues(curIssues.messages())
