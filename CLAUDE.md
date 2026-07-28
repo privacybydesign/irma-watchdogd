@@ -3,8 +3,9 @@
 `irma-watchdogd` is a single Go binary that runs a fixed set of checks against the
 public IRMA/Yivi infrastructure on a timer and reports what it finds over HTTP,
 webhooks and Slack. `README.md` describes what it checks and how to install it;
-`config.yaml.example` is the reference for every configuration option. This file
-covers the things you need to know before changing the code.
+`config.yaml.example` is the reference for the configuration options, with one
+gap: `slackwebhooks` (`Conf.SlackWebhooks`) has no entry there. This file covers
+the things you need to know before changing the code.
 
 ## Source files
 
@@ -47,13 +48,13 @@ or the webhooks itself.
 
 ### Where findings end up
 
-* **HTTP GET** on `bindaddr`: `handler` reads `currentState()` and renders the
+* HTTP GET on `bindaddr`: `handler` reads `currentState()` and renders the
   full confirmed set, warnings and dangers alike. This is the pull view, so it
   shows what is wrong right now rather than what changed.
-* **Webhooks**: `pushToWebHooks` receives only the *new* entries and filters them
+* Webhooks: `pushToWebHooks` receives only the *new* entries and filters them
   down to `danger`. Warnings never reach a webhook. Delivery is skipped entirely
   while `initialCheck` is true, so a restart does not replay known problems.
-* **Slack**: `pushToSlack` receives the new and fixed entries. Dangers get a
+* Slack: `pushToSlack` receives the new and fixed entries. Dangers get a
   `<!channel>` mention, warnings a message without one, fixed entries a green
   one. Slack is not suppressed on the initial check; it posts an "I just
   (re)started" note first instead.
@@ -65,37 +66,37 @@ substituted with `strings.Replace`, not used as a format string, on purpose.
 
 Follow `checkAtumServers` for the simplest example.
 
-1. **Config field:** add it to `Conf` in `main.go`. There are no yaml tags, so
+1. Config field: add it to `Conf` in `main.go`. There are no yaml tags, so
    `gopkg.in/yaml.v3` maps the lowercased field name: `CheckAtumServers` reads
    the key `checkatumservers`. There is no per-check interval option to add;
    everything runs on `interval`.
-2. **The function:** put it in `main.go` next to the other `check*` functions.
+2. The function: put it in `main.go` next to the other `check*` functions.
    Signature is `func checkX() (ret issueEntries)`, or take
    `*irma.Configuration` if you need the scheme configuration, as
    `checkSchemeManagers` does. Only add a new file if the check brings its own
    config type, which is why `health_check.go` is separate.
-3. **HTTP:** use `newHTTPClient()` from `util.go` rather than `http.Get`; it
+3. HTTP: use `newHTTPClient()` from `util.go` rather than `http.Get`; it
    retries, which is what keeps a single dropped packet from paging anyone.
    Attach `newRequestTrace()` and call `logFailedAttempt` from `CheckRetry` the
    way `checkCertificateExpiryOf` does, so a failure records which phase hung.
-4. **Wire it up:** add one line to `runChecks`:
+4. Wire it up: add one line to `runChecks`:
    `curIssues = append(curIssues, checkX()...)`. That is what gets the check
    debouncing and all three output paths.
-5. **Severity:** `danger` reaches webhooks and mentions `<!channel>`; `warning`
+5. Severity: `danger` reaches webhooks and mentions `<!channel>`; `warning`
    only shows up on the HTTP page and in a quiet Slack message. Scheme problems
    are warnings because the app keeps working without the scheme.
-6. **Message text is the debounce key:** `confirmIssues` counts streaks per
+6. Message text is the debounce key: `confirmIssues` counts streaks per
    message string, so the message must be identical on every cycle the problem
    persists. Do not interpolate a timestamp, a duration, an attempt count or a
    random port into it. A message that varies never reaches its streak
    threshold, so it is never reported at all, and if the threshold is 1 it is
    reported as new every cycle instead.
-7. **Logging:** never log a webhook or Slack URL directly, and never log a
+7. Logging: never log a webhook or Slack URL directly, and never log a
    response body directly. Use `redactURL`/`redactErr` and `truncateForLog`.
    Webhook URLs carry a secret in the path, and errors from `net/http` embed the
    full URL in their message.
-8. **Config example:** add the new option to `config.yaml.example`.
-9. **Test it:** see below.
+8. Config example: add the new option to `config.yaml.example`.
+9. Test it: see below.
 
 ## Debouncing
 
