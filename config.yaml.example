@@ -16,6 +16,9 @@ checkcertificateexpiry:
     - https://metrics.privacybydesign.foundation
 checkatumservers:
     - https://keyshare.privacybydesign.foundation/atumd
+# Watch the IANA DNSSEC root trust anchors for a newly added KeyDigest or an
+# existing one gaining an expiration (validUntil) date. Leave unset to disable.
+checkrootanchors: https://data.iana.org/root-anchors/root-anchors.xml
 healthchecks:
     - requesturl: https://privacybydesign.foundation
       responsebodycontains: "De stichting Privacy by Design creëert en onderhoudt gratis open source software waarbij de privacy van de gebruiker voorop staat."
