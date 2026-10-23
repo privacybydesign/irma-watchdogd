@@ -29,7 +29,6 @@ func runHealthChecks(checks []HealthCheck) (issues issueEntries) {
 	issueChan := make(chan *issueEntry, len(checks))
 
 	for _, check := range checks {
-		check := check
 		issueChan <- runHealthCheck(client, check)
 	}
 

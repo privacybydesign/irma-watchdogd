@@ -177,7 +177,7 @@ func main() {
 		log.Printf("checkSchemeManager: TempDir: %s", err)
 		return
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	icDir := path.Join(tempDir, "irma_configuration")
 	err = os.Mkdir(icDir, 0700)
@@ -411,7 +411,7 @@ func sendWebHook(u string) bool {
 		log.Printf("Webhook %s: %s", redactURL(u), redactErr(err, u))
 		return false
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
 		log.Printf("Webhook response body error: %s", err)
@@ -440,7 +440,6 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 			message := "<!channel> New issues discovered."
 			var attachments []slack.Attachment
 			for _, msg := range dangers {
-				msg := msg
 				attachments = append(attachments, slack.Attachment{
 					Fallback: &msg,
 					Text:     &msg,
@@ -454,7 +453,6 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 			message := "New warnings discovered."
 			var attachments []slack.Attachment
 			for _, msg := range warnings {
-				msg := msg
 				attachments = append(attachments, slack.Attachment{
 					Fallback: &msg,
 					Text:     &msg,
@@ -469,7 +467,6 @@ func pushToSlack(newIssues, fixedIssues issueEntries, initial bool) {
 		message := "The following issues and warnings were fixed."
 		var attachments []slack.Attachment
 		for _, msg := range fixedIssues.messages() {
-			msg := msg
 			attachments = append(attachments, slack.Attachment{
 				Fallback: &msg,
 				Text:     &msg,
@@ -509,7 +506,6 @@ func checkCertificateExpiry() (ret issueEntries) {
 	issueEntriesChan := make(chan issueEntries, len(conf.CheckCertificateExpiry))
 
 	for _, check := range conf.CheckCertificateExpiry {
-		check := check
 		issueEntriesChan <- checkCertificateExpiryOf(client, check)
 	}
 
@@ -551,7 +547,7 @@ func checkCertificateExpiryOf(client *retryablehttp.Client, url string) (ret iss
 		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: error %s", url, err)})
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.TLS == nil {
 		ret = append(ret, issueEntry{warning, fmt.Sprintf("%s: no TLS enabled", url)})
 		return

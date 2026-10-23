@@ -24,9 +24,7 @@ func TestHandlerStateRace(t *testing.T) {
 	stop := make(chan struct{})
 
 	// Writer: mimic the tail of runChecks updating the shared globals.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -35,19 +33,17 @@ func TestHandlerStateRace(t *testing.T) {
 			}
 			setState(issueEntries{{warning, "x"}}, time.Now())
 		}
-	}()
+	})
 
 	// Readers: hit the handler the way an HTTP client would.
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 200; j++ {
+	for range 4 {
+		wg.Go(func() {
+			for range 200 {
 				rec := httptest.NewRecorder()
 				req := httptest.NewRequest(http.MethodGet, "/", nil)
 				handler(rec, req)
 			}
-		}()
+		})
 	}
 
 	time.Sleep(50 * time.Millisecond)

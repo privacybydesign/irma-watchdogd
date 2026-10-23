@@ -15,7 +15,7 @@ import (
 func TestSendWebHookReusesConnection(t *testing.T) {
 	var newConns int32
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	}))
 	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
 		if state == http.StateNew {
@@ -25,7 +25,7 @@ func TestSendWebHookReusesConnection(t *testing.T) {
 	srv.Start()
 	defer srv.Close()
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if !sendWebHook(srv.URL) {
 			t.Fatalf("sendWebHook returned false on request %d", i)
 		}
