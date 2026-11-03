@@ -7,6 +7,8 @@ At the moment it checks:
  * Whether the publickeys of the issuers will expire soon.
  * Whether the TLS certificates of the webservers are (or soon will) expired
  * HTTP health checks being specified in the configuration
+ * Whether the IANA DNSSEC root trust anchors gained a new KeyDigest or an
+   existing one gained an expiration date
 
 The tool has the following ways to report issues it finds:
 
