@@ -4,8 +4,8 @@ go 1.26.10
 
 require (
 	github.com/ashwanthkumar/slack-go-webhook v0.0.0-20200209025033-430dd4e66960
-	github.com/bwesterb/go-atum v1.1.5
-	github.com/dustin/go-humanize v1.0.1
+	github.com/bwesterb/go-atum v1.1.6
+	github.com/dustin/go-humanize v1.1.0
 	github.com/hashicorp/go-retryablehttp v0.7.8
 	github.com/privacybydesign/irmago v0.19.2
 	gopkg.in/yaml.v3 v3.0.1
@@ -17,7 +17,7 @@ require (
 	github.com/bwesterb/byteswriter v1.0.0 // indirect
 	github.com/bwesterb/go-exptable v1.0.0 // indirect
 	github.com/bwesterb/go-pow v1.0.0 // indirect
-	github.com/bwesterb/go-xmssmt v1.5.2 // indirect
+	github.com/bwesterb/go-xmssmt v1.6.0 // indirect
 	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.1 // indirect
@@ -81,7 +81,7 @@ require (
 	github.com/valyala/fastjson v1.6.10 // indirect
 	github.com/x-cray/logrus-prefixed-formatter v0.5.2 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	go.etcd.io/bbolt v1.4.3 // indirect
+	go.etcd.io/bbolt v1.5.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
